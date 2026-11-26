@@ -1,0 +1,12 @@
+# Secrets: seeds and project IDs live in .env, never in git
+.env
+.env.*
+!.env.example
+
+# Dependencies and build output
+node_modules/
+dist/
+
+# Local agent worktrees and personal settings
+.claude/worktrees/
+.claude/settings.local.json
