@@ -1,0 +1,54 @@
+{
+  "name": "shielded-fanout-example",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Midnight Preprod example: mint a shielded token and pay several shielded wallets in one transaction.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "packageManager": "pnpm@11.21.0",
+  "scripts": {
+    "dev": "node scripts/copy-zk.mjs && vite",
+    "dev:mock": "vite --mode mock",
+    "build": "tsc --noEmit && node scripts/copy-zk.mjs && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "compile": "pnpm --filter ./contract run compile",
+    "sizes": "node scripts/copy-zk.mjs --table"
+  },
+  "dependencies": {
+    "@midnight-ntwrk/dapp-connector-api": "4.0.1",
+    "@midnight-ntwrk/midnight-js-contracts": "5.0.1",
+    "@midnight-ntwrk/midnight-js-dapp-connector-proof-provider": "5.0.1",
+    "@midnight-ntwrk/midnight-js-fetch-zk-config-provider": "5.0.1",
+    "@midnight-ntwrk/midnight-js-indexer-public-data-provider": "5.0.1",
+    "@midnight-ntwrk/midnight-js-protocol": "5.0.1",
+    "@midnight-ntwrk/midnight-js-types": "5.0.1",
+    "@midnight-ntwrk/midnight-js-utils": "5.0.1",
+    "@midnightntwrk/ledger-v9": "1.0.2",
+    "@midnightntwrk/onchain-runtime-v4": "4.0.2",
+    "@midnightntwrk/wallet-sdk-address-format": "4.0.1",
+    "@scure/base": "^2.4.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.3",
+    "semver": "^7.7.4"
+  },
+  "devDependencies": {
+    "@testing-library/react": "^16.3.0",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.3",
+    "@types/semver": "^7.7.1",
+    "@vitejs/plugin-react": "^5.1.2",
+    "jsdom": "^26.1.0",
+    "typescript": "^5.9.3",
+    "vite": "6.4.5",
+    "vite-plugin-node-polyfills": "0.24.0",
+    "vite-plugin-top-level-await": "^1.5.0",
+    "vite-plugin-wasm": "^3.4.1",
+    "vitest": "^5.0.4"
+  }
+}

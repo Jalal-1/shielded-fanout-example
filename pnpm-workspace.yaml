@@ -1,0 +1,22 @@
+# The contract is its own package so that the two import paths in
+# contract/FanoutToken.compact ("./node_modules/@openzeppelin/...") resolve.
+packages:
+  - contract
+
+# Version pins restated from the official examples' toolchain.json
+# (github.com/midnightntwrk/midnight-examples), which pins them as npm overrides.
+overrides:
+  "@midnightntwrk/wallet-sdk": 2.0.1
+  "@midnightntwrk/ledger-v9": 1.0.2
+  "@midnightntwrk/onchain-runtime-v4": 4.0.2
+  "@midnightntwrk/zkir-v3": 3.2.1
+  "vite-plugin-top-level-await>@swc/core": 1.15.47
+  "vite-plugin-top-level-await>uuid": 11.1.1
+
+# No dependency needs its install script: esbuild and @swc/core get their
+# binaries from optional platform packages, and msgpackr-extract is an optional
+# native speedup.
+allowBuilds:
+  "@swc/core": false
+  esbuild: false
+  msgpackr-extract: false

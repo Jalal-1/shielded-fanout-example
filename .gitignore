@@ -7,6 +7,13 @@
 node_modules/
 dist/
 
-# Local agent worktrees and personal settings
-.claude/worktrees/
-.claude/settings.local.json
+# Filled by scripts/copy-zk.mjs from contract/managed/
+public/
+
+# Prover keys are large. Only the ones the UI proves with are committed;
+# `pnpm compile` regenerates the rest. See scripts/copy-zk.mjs.
+contract/managed/FanoutToken/keys/*.prover
+!contract/managed/FanoutToken/keys/mint.prover
+
+# Local agent settings and worktrees
+.claude/
