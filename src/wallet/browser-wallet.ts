@@ -54,6 +54,12 @@ export interface WalletView {
   readonly nightPending: bigint;
   /** DUST available right now, in its smallest unit (15 decimals). */
   readonly dust: bigint;
+  /**
+   * True while DUST is tied up in a transaction that has not finalized yet. A
+   * fee spends a whole DUST coin and returns the rest, so a wallet with one
+   * coin reads zero DUST for those few blocks.
+   */
+  readonly dustBusy: boolean;
   /** True once the wallet's NIGHT has been registered to generate DUST. */
   readonly dustRegistered: boolean;
   /** NIGHT coins not yet registered for DUST. */
@@ -164,6 +170,7 @@ export class BrowserWallet {
         .filter((coin) => coin.utxo.type === night)
         .reduce((sum, coin) => sum + coin.utxo.value, 0n),
       dust: state.dust.balance(new Date()),
+      dustBusy: state.dust.pendingCoins.length > 0,
       dustRegistered: nightCoins.length > 0 && unregistered === 0,
       unregisteredNightCoins: unregistered,
       shielded: state.shielded.balances,

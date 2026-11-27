@@ -131,7 +131,10 @@ export function App({ refreshMs = 1000 }: AppProps) {
   const account = wallet?.coinPublicKey;
   const synced = view?.synced ?? false;
   const dust = view?.dust ?? 0n;
-  const hasDust = dust > 0n;
+  // DUST tied up in a transaction counts as having DUST: with one DUST coin the balance reads
+  // zero for a few blocks after every fee, and the page must not act as if there were none.
+  const dustBusy = view?.dustBusy ?? false;
+  const hasDust = dust > 0n || dustBusy;
   const balance = token && view ? (view.shielded[token.tokenType] ?? 0n) : 0n;
   // Change on its way back from a transaction that has not finalized yet.
   const arriving = token && view ? (view.shieldedArriving[token.tokenType] ?? 0n) : 0n;
@@ -596,7 +599,8 @@ export function App({ refreshMs = 1000 }: AppProps) {
     { number: 3, tab: DUST, title: `Generate ${DUST}`, done: hasDust, locked: walletLocked || (night === 0n && `Get ${NIGHT} first.`) },
     { number: 4, tab: 'Token', title: 'Your token contract', done: !!token, locked: walletLocked },
     { number: 5, tab: 'Mint', title: 'Mint', done: !!token && (balance > 0n || arriving > 0n), locked: tokenLocked },
-    { number: 6, tab: 'Pay', title: 'Pay wallets', done: false, locked: tokenLocked },
+    // A list that is loaded stays on screen whatever the balances do: its progress must never be hidden.
+    { number: 6, tab: 'Pay', title: 'Pay wallets', done: false, locked: list ? false : tokenLocked },
   ];
   // Until the user picks a tab, show the first step that still needs doing.
   // It only ever moves forward: a balance that dips while a transaction is in flight must not
@@ -670,7 +674,10 @@ export function App({ refreshMs = 1000 }: AppProps) {
             {nightBusy && <span className="hint"> in a transaction</span>}
           </dd>
           <dt>{DUST}</dt>
-          <dd>{view ? formatDust(dust) : '—'}</dd>
+          <dd>
+            {view ? formatDust(dust) : '—'}
+            {dustBusy && <span className="hint"> in a transaction</span>}
+          </dd>
           {token && (
             <>
               <dt>{token.symbol}</dt>
