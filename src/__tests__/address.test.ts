@@ -27,6 +27,14 @@ describe('checkShieldedAddress', () => {
     expect(checkShieldedAddress(`  ${address}  `, 'preprod')).toBeNull();
   });
 
+  it('accepts a Mainnet address, whose prefix carries no network name', () => {
+    const address = shielded('mainnet');
+    expect(address.startsWith('mn_shield-addr1')).toBe(true);
+    expect(checkShieldedAddress(address, 'mainnet')).toBeNull();
+    expect(checkShieldedAddress(address, 'preprod')).toMatch(/another network/);
+    expect(checkShieldedAddress(shielded('preprod'), 'mainnet')).toMatch(/another network/);
+  });
+
   it('rejects a shielded address for another network', () => {
     expect(checkShieldedAddress(shielded('preview'), 'preprod')).toMatch(/another network/);
   });

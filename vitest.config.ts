@@ -1,8 +1,7 @@
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 
-// Tests need no wallet and no network. The UI test opts into a browser-like
-// environment with a `@vitest-environment jsdom` comment at its top.
+// The tests cover the logic that can be checked without a wallet or a network.
 export default defineConfig({
   plugins: [react()],
   test: {

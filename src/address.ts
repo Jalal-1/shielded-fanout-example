@@ -5,6 +5,9 @@
 //
 //   mn_shield-addr_preprod1<coin public key><encryption public key><checksum>
 //
+// A test network's name is part of the prefix. Mainnet's prefix has no name:
+// mn_shield-addr1...
+//
 // The coin public key says who owns a coin. The encryption public key lets the
 // sender encrypt the coin's details so that only the recipient can find it.
 import { bech32m } from '@scure/base';
@@ -12,7 +15,8 @@ import { bech32m } from '@scure/base';
 const PAYLOAD_BYTES = 64;
 
 /** The prefix every shielded address on `networkId` starts with. */
-export const shieldedAddressPrefix = (networkId: string): string => `mn_shield-addr_${networkId}`;
+export const shieldedAddressPrefix = (networkId: string): string =>
+  networkId === 'mainnet' ? 'mn_shield-addr' : `mn_shield-addr_${networkId}`;
 
 /** Returns `null` when the address is usable, or a sentence saying why not. */
 export function checkShieldedAddress(text: string, networkId: string): string | null {

@@ -1,0 +1,12 @@
+{
+  "name": "fanout-wallet-sdk",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "dependencies": {
+    "@midnightntwrk/wallet-sdk": "2.0.1",
+    "effect": "3.22.5"
+  }
+}

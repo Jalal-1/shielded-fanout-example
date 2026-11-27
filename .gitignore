@@ -10,6 +10,9 @@ dist/
 # Filled by scripts/copy-zk.mjs from contract/managed/
 public/
 
+# Development diagnostics written by `pnpm dev`
+.dev-log/
+
 # Prover keys are large. Only the ones the UI proves with are committed;
 # `pnpm compile` regenerates the rest. See scripts/copy-zk.mjs.
 contract/managed/FanoutToken/keys/*.prover
@@ -17,3 +20,7 @@ contract/managed/FanoutToken/keys/*.prover
 
 # Local agent settings and worktrees
 .claude/
+
+
+# Recipient lists made for a test run
+pay-*.txt

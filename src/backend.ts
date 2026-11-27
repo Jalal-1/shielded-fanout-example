@@ -1,10 +1,9 @@
-// What the UI needs from "the chain", apart from the wallet itself.
+// What the UI needs from the token contract.
 //
-// There are two implementations:
-//   - src/midnight/real-backend.ts talks to Midnight Preprod with Midnight.js.
-//   - src/mock/mock-backend.ts fakes it in memory, for `pnpm dev:mock` and tests.
-// The UI only knows this interface, so it runs the same way against both.
-import type { Session } from './wallet';
+// The one implementation is src/midnight/real-backend.ts, which talks to
+// Midnight with Midnight.js and the in-page wallet. The UI only knows
+// this interface, which keeps it free of Midnight.js details.
+import type { BrowserWallet } from './wallet/browser-wallet';
 
 /** The user's chosen token metadata. It is fixed when the contract is deployed. */
 export interface TokenMeta {
@@ -28,24 +27,49 @@ export interface TokenSecrets {
   readonly instanceSalt: string;
 }
 
-/** The two names a transaction goes by. */
+/** The two names a transaction goes by, and its size. */
 export interface TxRef {
   /** The identifier the indexer is asked about. */
   readonly txId: string;
-  /** The hash block explorers and wallets show. */
+  /** The hash block explorers show. */
   readonly txHash: string;
+  /** Size of the finished transaction in bytes. */
+  readonly bytes?: number;
 }
 
 /** `pending` means the indexer has not seen the transaction (yet). */
 export type TxOutcome = 'finalized' | 'failed' | 'pending';
 
+/** Where a contract transaction is. */
+export type Stage = 'preparing' | 'proving' | 'signing' | 'submitting' | 'finalizing';
+
 export interface Backend {
-  /** Deploy a new token contract owned by the connected wallet. */
-  deployToken(session: Session, meta: TokenMeta, secrets: TokenSecrets): Promise<TokenInfo>;
-  /** Mint `amount` (smallest unit) to the connected wallet. Resolves once finalized. */
-  mint(session: Session, token: TokenInfo, secrets: TokenSecrets, amount: bigint): Promise<TxRef>;
-  /** Read the id and hash out of a serialized transaction. */
-  describeTx(tx: string): TxRef;
+  /** Deploy a new token contract owned by the wallet. Resolves once it is on chain. */
+  deployToken(
+    wallet: BrowserWallet,
+    meta: TokenMeta,
+    secrets: TokenSecrets,
+    onStage?: (stage: Stage) => void,
+  ): Promise<TokenInfo>;
+  /** Mint `amount` (smallest unit) to the wallet. Resolves once finalized. */
+  mint(
+    wallet: BrowserWallet,
+    token: TokenInfo,
+    secrets: TokenSecrets,
+    amount: bigint,
+    onStage?: (stage: Stage) => void,
+  ): Promise<TxRef>;
+  /**
+   * Read a token contract from the chain. Returns `null` when no contract
+   * exists at that address, so nothing is ever shown as deployed on trust.
+   */
+  readToken(wallet: BrowserWallet, contractAddress: string): Promise<TokenInfo | null>;
   /** Ask the indexer about a transaction, waiting up to `maxWaitMs` for it. */
-  checkTx(session: Session, txId: string, maxWaitMs: number): Promise<TxOutcome>;
+  checkTx(wallet: BrowserWallet, txId: string, maxWaitMs: number): Promise<TxOutcome>;
+  /**
+   * True when the indexer answers that it has no transaction with this
+   * identifier. Throws when the indexer cannot be asked, so that "not there"
+   * is never assumed.
+   */
+  txIsAbsent(txId: string): Promise<boolean>;
 }

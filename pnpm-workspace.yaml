@@ -2,6 +2,7 @@
 # contract/FanoutToken.compact ("./node_modules/@openzeppelin/...") resolve.
 packages:
   - contract
+  - sdk
 
 # Version pins restated from the official examples' toolchain.json
 # (github.com/midnightntwrk/midnight-examples), which pins them as npm overrides.
@@ -14,9 +15,13 @@ overrides:
   "vite-plugin-top-level-await>uuid": 11.1.1
 
 # No dependency needs its install script: esbuild and @swc/core get their
-# binaries from optional platform packages, and msgpackr-extract is an optional
-# native speedup.
+# binaries from optional platform packages, classic-level loads a shipped
+# prebuild, and the rest are optional native speedups.
 allowBuilds:
   "@swc/core": false
+  classic-level: false
+  cpu-features: false
   esbuild: false
   msgpackr-extract: false
+  protobufjs: false
+  ssh2: false

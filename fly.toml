@@ -1,0 +1,19 @@
+# The hosted site on Fly.io. See "Deploying" in README.md.
+#
+# The three Blockfrost project IDs are Fly secrets, not part of this file:
+#   fly secrets set BLOCKFROST_PREPROD_ID=... BLOCKFROST_PREVIEW_ID=... BLOCKFROST_MAINNET_ID=...
+
+app = 'shielded-fanout'
+primary_region = 'lhr'
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # One small machine. It sleeps when nobody is connected and wakes on the next visit.
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[vm]]
+  size = 'shared-cpu-1x'
+  memory = '256mb'

@@ -1,192 +1,298 @@
-# Shielded fanout on Midnight Preprod
+# Shielded fanout
 
-A small browser dApp that shows how to pay several shielded wallets in **one transaction** on [Midnight](https://midnight.network) Preprod. You connect a wallet, deploy and mint your own shielded token, then send it to as many recipients as you list. Either every recipient is paid or none is.
+A proof of concept for [Midnight](https://midnight.network): mint your own shielded token, then pay many shielded wallets at once. Up to 64 recipients go in **one transaction**, where either everyone is paid or nobody is. A longer list is sent as several such transactions, one after another, and the page keeps track of every line.
 
-The payout itself is about fifteen lines, in [`src/fanout.ts`](src/fanout.ts). The rest of the project is what it takes to get a token to pay out with.
+The wallet runs in the page, built on the official Midnight wallet SDK. It is the same code a backend service would run: there is no browser extension involved.
 
-## Quickstart
+**Live site:** https://shielded-fanout.fly.dev
+
+The payout itself is a dozen lines, in [`src/fanout.ts`](src/fanout.ts). The rest of the project is what it takes to get a wallet and a token to pay out with.
+
+## Contents
+
+- [Use the hosted site](#use-the-hosted-site)
+- [Run it yourself](#run-it-yourself)
+- [Using the app](#using-the-app)
+- [Checking that recipients were paid](#checking-that-recipients-were-paid)
+- [How the fanout works](#how-the-fanout-works)
+- [What was measured](#what-was-measured)
+- [Networks and the Blockfrost keys](#networks-and-the-blockfrost-keys)
+- [Deploying](#deploying)
+- [Project layout](#project-layout)
+- [Limits](#limits)
+
+## Use the hosted site
+
+You need one thing on your own machine: a **proof server**. Every Midnight transaction carries zero-knowledge proofs, and whoever makes them sees the transaction's private inputs, so the site does not make them for you.
+
+1. Start a proof server with Docker and leave it running:
+
+   ```bash
+   docker run --rm -p 127.0.0.1:6300:6300 midnightntwrk/proof-server:9.0.2 midnight-proof-server --job-capacity 1024
+   ```
+
+2. Open https://shielded-fanout.fly.dev and follow the six steps on the page.
+
+The page reaches the proof server at `http://127.0.0.1:6300`. Chrome and Firefox allow a site to do that, and may ask for permission to reach your local network. Brave and Safari may block it; if the page keeps saying the proof server is not answering, use Chrome, or [run the app yourself](#run-it-yourself).
+
+## Run it yourself
+
+You need:
+
+- **Node 22** and **pnpm**.
+- **Docker**, for the proof server.
+- A **Blockfrost project ID** for each Midnight network you want to use, from [blockfrost.io](https://blockfrost.io). The app reads the chain and submits transactions through Blockfrost.
+
+You do not need the Compact compiler: the compiled contract is committed.
 
 ```bash
 git clone https://github.com/Jalal-1/shielded-fanout-example.git
 cd shielded-fanout-example
 pnpm install
+cp .env.example .env
+```
+
+Put your project IDs in `.env`:
+
+```bash
+BLOCKFROST_PREPROD_ID=...
+BLOCKFROST_PREVIEW_ID=...
+BLOCKFROST_MAINNET_ID=...
+```
+
+Then start the proof server and the app:
+
+```bash
+pnpm proof:up
 pnpm dev
 ```
 
-Open http://localhost:3000 and connect your wallet.
+Open http://localhost:3000.
 
-### Try it without a wallet
+## Using the app
 
-```bash
-pnpm dev:mock
+The page is one screen. The panel on the left always shows what is happening, your balances and the progress of the payout. The six steps are tabs on the right.
+
+Pick the network at the top left: **Preprod**, **Preview** or **Mainnet**. Each network has its own wallet and its own token, and switching reloads the page. Start on a test network. Mainnet uses real NIGHT, and this proof of concept keeps the wallet's seed unencrypted in the browser.
+
+| Step | What you do |
+| --- | --- |
+| **1. Wallet** | Create a wallet, or restore one from its seed. A new wallet reads the chain's history once, which takes several minutes (about six on Preprod). Progress is saved, so later visits take seconds. Back up the seed. |
+| **2. tNIGHT** | Copy the address shown, open the faucet, and request test tokens. On Mainnet there is no faucet: send NIGHT to the address. |
+| **3. tDUST** | Press **Generate tDUST**. Fees are paid in DUST, which is not bought or sent: your NIGHT generates it over time once it is registered. Registering is one transaction and pays for itself. |
+| **4. Token** | Deploy your own token contract (name, symbol, decimals), or use one already on the network by its address. Only the wallet that deployed a contract can mint it. |
+| **5. Mint** | Mint an amount to your own wallet. |
+| **6. Pay** | Enter who to pay, and send. |
+
+### Paying a list
+
+The list is plain text, one wallet per line: its shielded address, then the amount.
+
+```text
+mn_shield-addr_preprod1qz...  17
+mn_shield-addr_preprod1x8...  29.5
 ```
 
-Mock mode runs the same UI against a pretend wallet and a pretend chain, both in memory. Nothing leaves the page. You can click through the whole flow with no extension, no funds and no network. Add `?unfunded` to the URL to see what a user with no tDUST sees.
+Paste it into the box or load it from a text file. The page checks every line and says what a press of the button will do, for example "2,000 wallets in 32 transactions, about 24 minutes". Keep the tab open and in front while it runs.
 
-## What you need
+After you start, every line has a row with its state:
 
-- Node 22 and pnpm.
-- A Midnight wallet extension that supports DApp Connector API 4.x, set to **Preprod**.
-- tNIGHT in that wallet from the [Preprod faucet](https://midnight-tmnight-preprod.nethermind.dev/), and tDUST generated from it in the wallet. Fees are paid in tDUST. The site does not fund wallets and cannot do this step for you.
+| State | Meaning |
+| --- | --- |
+| **Paid** | Its transaction is finalized on chain. |
+| **Failed, not paid** | Its transaction could not be built, or failed on chain. Nothing was paid. Safe to send again. |
+| **Unconfirmed** | Its transaction was built and handed over, but the network has not reported it. Held back from sending again, so that nobody is paid twice. |
+| **Not sent** | The run stopped before reaching it. |
 
-You do not need a proof server, an API key or the Compact compiler. The wallet makes the proofs, the app uses the indexer your wallet is already configured with, and the compiled contract is committed.
+What you can do from there:
 
-## The flow
+- **Send the wallets not paid yet.** One button sends every failed and unsent line again, and never a paid one.
+- **Check the unconfirmed.** Asks the network again what became of those transactions.
+- **Filter** the rows by state, and see why each failed transaction failed.
+- **Download the results (CSV):** every line with its state and transaction hash.
+- **Stop after this transaction** ends a run cleanly.
 
-1. **Connect.** The app lists the wallets it finds under `window.midnight` and connects on Preprod.
-2. **Fund.** It shows your tNIGHT and tDUST. Everything else stays disabled until you have tDUST.
-3. **Deploy.** You deploy your own copy of the token contract. Your wallet owns it, so only you can mint.
-4. **Mint.** You mint an amount to your own shielded address.
-5. **Pay out.** You list recipients and amounts and send them all in one transaction.
+If the page is reloaded part-way, load the same list again: the page recognizes it and continues where it stopped. Progress is stored by line number, without addresses or amounts.
+
+## Checking that recipients were paid
+
+A shielded payment is encrypted to its recipient, so the chain does not show who was paid. Whoever holds the recipients' keys can check. [`scripts/check-recipients.mjs`](scripts/check-recipients.mjs) derives recipient keys from one mnemonic or seed, reads transactions from the indexer, and tries each key on each transaction. No wallet sync is needed.
+
+```bash
+# Make a test list: 2,000 addresses derived from one mnemonic, 1 token each
+node scripts/check-recipients.mjs --mnemonic-file recipients.mnemonic --count 2000 --list 1 > pay.txt
+
+# After paying it: which of those wallets were paid in the last 600 blocks?
+node scripts/check-recipients.mjs --mnemonic-file recipients.mnemonic --count 2000 --decimals 2
+```
+
+It reads the project ID from `.env`. Its other options are described at the top of the file: `--tx` to check single transactions, `--from-block`, `--network` and `--threads`. Do not run it during a payout on the same machine: it is processor-heavy and slows the proof server.
 
 ## How the fanout works
 
-A dApp never sees your coins. It tells the wallet what should happen, and the wallet works out how. For a fanout, that is one call with one output per recipient:
+The payout is one wallet SDK call with one output per recipient:
 
 ```ts
-// src/fanout.ts
-const { tx } = await wallet.makeTransfer(
-  payments.map((payment) => ({
-    kind: 'shielded' as const,
-    type: tokenType,          // the token's 32-byte type, as hex
-    value: payment.amount,    // in the token's smallest unit
-    recipient: payment.recipient, // mn_shield-addr_preprod1...
-  })),
+// src/wallet/browser-wallet.ts
+const recipe = await facade.transferTransaction(
+  [
+    {
+      type: 'shielded',
+      outputs: payments.map((payment) => ({
+        type: tokenType, // the token's 32-byte type, as hex
+        receiverAddress: MidnightBech32m.parse(payment.recipient).decode(ShieldedAddress, networkId),
+        amount: payment.amount, // in the token's smallest unit
+      })),
+    },
+  ],
+  { ttl, payFees: true },
 );
-
-await wallet.submitTransaction(tx);
 ```
 
-`makeTransfer` and `submitTransaction` are part of the [DApp Connector API](https://github.com/midnightntwrk/midnight-dapp-connector-api/blob/main/SPECIFICATION.md), which every compatible wallet implements. Inside `makeTransfer` the wallet:
+Inside that call the wallet:
 
-- **selects inputs:** which of your coins to spend,
+- **selects inputs:** which of its coins to spend,
 - **creates the outputs:** one new coin per recipient,
-- **returns the change:** one more coin back to you for whatever is left over,
-- **pays the fee** in tDUST,
-- **proves and signs** the transaction, after you approve it.
+- **returns the change:** one more coin back to the sender for whatever is left over,
+- **adds the fee** in DUST.
 
-Because every output is in the same transaction, the payout is atomic. There is no state where the first recipient has been paid and the second has not.
+The app then signs it, has the proof server prove it, and submits it ([`src/fanout.ts`](src/fanout.ts)). Because every output is in the same transaction, the payout is atomic.
 
-Two things to know:
+Three things to know:
 
 - **No contract is involved in the payout.** A shielded token on Midnight is a native coin. The contract is needed to mint it. Moving it is a plain wallet transfer.
-- **A transaction has a size limit.** A long enough recipient list will not fit in one. The app does not split a payout across transactions. `LARGEST_VERIFIED_RECIPIENT_COUNT` in `src/fanout.ts` records the largest payout that has finalized on Preprod with this code.
+- **Transactions of a long list go one after another.** A payment spends whole coins, and the rest comes back as change that can be spent only once the transaction is finalized. So each transaction waits for the one before it.
+- **A transaction is built once.** If building fails (a proof fails, a request is dropped), nothing was submitted and it is built again. Once built it is never built a second time: the network's verdict decides whether its lines were paid.
 
 ### What the chain shows
 
-Shielded transfers hide who paid whom and how much. Recipients' addresses and the amounts are not written on chain in the clear, and the app keeps them in memory only: it never stores, logs or sends them anywhere except to your wallet.
-
-Some things are public:
+Shielded transfers hide who paid whom and how much. Some things are public:
 
 - **That a transaction happened**, and roughly its shape, such as how many coins it created.
-- **Minting.** A mint is a contract call. The contract keeps a public running total, so the amount you mint is visible.
+- **Minting.** A mint is a contract call, and the contract keeps a public running total.
 - **Deploying.** The contract's address, and the name, symbol and decimals you chose.
 
-## The token contract
+## What was measured
 
-[`contract/FanoutToken.compact`](contract/FanoutToken.compact) is a thin wrapper around OpenZeppelin's [`ZOwnableNativeShieldedToken`](https://github.com/OpenZeppelin/compact-contracts) preset. It re-exports every circuit of the preset and adds nothing.
+On Preprod, on 26 November 2026, with the proof server on a 24-thread desktop:
 
-- **Only the owner mints and burns.** The owner is fixed at deploy as a commitment to `hash(owner's coin public key, secret nonce)`.
-- **The secret nonce is the key to minting.** This app keeps it in the browser's `localStorage`. If you clear the site's data, nobody can mint that token again. The contract has no recovery.
-- **Every deployment is a new token.** The token type is derived from the contract address, so two users of this app never share a token.
-- **This is a demo.** Do not use a token deployed from a web page's local storage for anything of value.
+| | |
+| --- | --- |
+| Recipients in one transaction | 64 (the largest tried, not the network's limit) |
+| Size of that transaction | 343 KB |
+| Selecting coins and proving | 22 to 25 seconds |
+| Network finality | about 20 seconds, at times up to 65 |
+| One 64-recipient transaction, start to finalized | about 44 seconds |
+| Fee | about 5 tDUST per 64-recipient transaction |
+| 2,000 recipients | 32 transactions, about 24 minutes when nothing goes wrong |
+
+Worked examples on Preprod:
+
+- **64 recipients, one transaction:** `6e7a098a6e910b857408c7f865005bcb06d8a73eff613b746bc7a4eee2ef6518` (block 3,591,504).
+- **2,000 recipients, 32 transactions:** from `0253d4a9f49f2f47e1aed593fc064f56ed6550bc2eecb93631e7ae4b2da2ecf6` (block 3,593,773) to `c181bb5519e6d5d80b38233f7e60b2f21a24ecdf20aed98f303adaa2d06b4d35` (block 3,594,086). The checker confirmed that each of the 2,000 wallets received exactly one payment.
+
+That run was interrupted once, when the page lost its connection to the proof server while proving. Nothing had been submitted, and the remaining wallets were paid by sending the unpaid lines again. Since then the page retries a transaction that could not be built by itself.
+
+Proving time depends on the machine running the proof server. Finality depends on the network.
+
+## Networks and the Blockfrost keys
+
+Blockfrost wants a project ID on every request. A page that held the ID would show it to every visitor, so the page never has it. It talks to its own origin:
+
+| The page asks | The server passes it to |
+| --- | --- |
+| `/chain/<network>/indexer` | the indexer's GraphQL endpoint |
+| `/chain/<network>/indexer/ws` | the indexer's WebSocket, which is how the wallet syncs |
+| `/chain/<network>/node` | the node's RPC WebSocket, which is how transactions are submitted |
+
+The server adds the project ID and forwards the request. In development that server is Vite ([`vite.config.ts`](vite.config.ts)), reading the IDs from `.env`. On the hosted site it is nginx ([`deploy/nginx.conf.template`](deploy/nginx.conf.template)), reading them from the environment.
+
+The keys are hidden, not unusable: anyone can send requests through the site. The nginx configuration limits how fast one visitor can do that.
+
+## Deploying
+
+The hosted site is one small container: nginx serving the built page and forwarding chain requests. [`Dockerfile`](Dockerfile) builds it and [`fly.toml`](fly.toml) describes it for [Fly.io](https://fly.io).
+
+```bash
+fly apps create <your-app-name>          # and set the same name in fly.toml
+fly secrets set BLOCKFROST_PREPROD_ID=... BLOCKFROST_PREVIEW_ID=... BLOCKFROST_MAINNET_ID=...
+fly deploy --ha=false
+```
+
+Any host that runs a container works the same way: set the three environment variables and expose port 8080.
+
+The site serves the circuit files the token contract needs. The one large file is `keys/mint.prover` (43 MB), the prover key for minting. Only that prover key is committed and served, because `mint` is the only contract circuit the page proves. `pnpm sizes` lists every circuit file.
 
 ## Project layout
 
 | Path | What it is |
 | --- | --- |
 | `src/fanout.ts` | The payout: one transfer, many recipients. Start here. |
-| `src/wallet.ts` | Finding and connecting a wallet, balances, plain-language errors. |
-| `src/midnight/real-backend.ts` | Deploying and minting on Preprod with Midnight.js. |
-| `src/mock/mock-chain.ts` | The pretend wallet and chain behind `pnpm dev:mock` and the tests. |
-| `src/App.tsx` | The user interface. |
+| `src/wallet/browser-wallet.ts` | The wallet's operations: register for DUST, pay, sign, submit. |
+| `src/wallet/sdk-wallet.ts` | Building the wallet from a seed with the wallet SDK, and the settings that make it sync quickly. |
+| `src/wallet/wallet-store.ts` | Where the seed and the sync state are kept in the browser. |
+| `src/payout.ts` | Which line of a list was paid, which was not, and which can be sent again. |
+| `src/PayoutPanel.tsx` | The payout screen. |
+| `src/App.tsx` | The rest of the user interface, and the loop that pays a list. |
+| `src/midnight/real-backend.ts` | Deploying and minting the token with Midnight.js. |
+| `src/network.ts` | The three networks and where the page finds them. |
 | `src/address.ts`, `src/amounts.ts` | Checking a shielded address; converting typed amounts. |
-| `src/storage.ts` | What is kept in `localStorage`: your token and the last payout hash. |
+| `src/storage.ts` | What is kept in `localStorage`: your token and the progress of a payout. |
 | `contract/` | The token contract, its witness, and the compiled output in `managed/`. |
+| `sdk/` | One entry point for the wallet SDK, so the dev server bundles it once. |
+| `scripts/check-recipients.mjs` | Checks from the chain which recipients were paid. |
 | `scripts/copy-zk.mjs` | Copies the circuit files the site must serve into `public/`. |
+| `deploy/`, `Dockerfile`, `fly.toml` | The hosted site. |
 
-## Scripts
+### Scripts
 
 | Command | What it does |
 | --- | --- |
-| `pnpm dev` | Runs the app against a real wallet on Preprod. |
-| `pnpm dev:mock` | Runs the app against the in-memory mock. |
+| `pnpm dev` | Runs the app at http://localhost:3000. |
+| `pnpm proof:up`, `pnpm proof:down` | Starts and stops the proof server ([`compose.yml`](compose.yml)). |
 | `pnpm test` | Runs the tests. No wallet or network needed. |
 | `pnpm typecheck` | Type-checks the project. |
-| `pnpm build` | Builds the static site into `dist/`. |
-| `pnpm preview` | Serves `dist/` locally. |
+| `pnpm build` | Builds the site into `dist/`. |
+| `pnpm preview` | Serves `dist/` locally, with the same chain forwarding as `pnpm dev`. |
 | `pnpm sizes` | Prints the size of every circuit file the site serves. |
 | `pnpm compile` | Recompiles the contract. Needs the [Compact compiler](https://docs.midnight.network). |
 
-## Tests
+### Tests
 
-`pnpm test` covers:
+`pnpm test` covers what can be checked without a chain: address and amount parsing, cutting a list into transactions, the per-line payout record (what is safe to send again, what a reload does to it), and the compiled contract run in memory (the owner can mint, nobody else can, and the token type the app computes is the one the contract mints).
 
-- the payout module, against a fake wallet,
-- the whole UI flow against the mock wallet: mint 100, pay 17 and 29 in one transaction, end with 54,
-- the compiled contract, run in memory: the owner can mint, nobody else can, and the token type the app computes is the one the contract mints,
-- the real Midnight.js deploy path, up to the moment the transaction is handed to the wallet.
+Nothing in the repository pretends to be a wallet or a chain. Sending a transaction is tested by sending one on a test network.
 
-## Versions
+### The token contract
 
-Versions follow the pinned toolchain of the [official Midnight examples](https://github.com/midnightntwrk/midnight-examples) (`toolchain.json`).
+[`contract/FanoutToken.compact`](contract/FanoutToken.compact) is a thin wrapper around OpenZeppelin's [`ZOwnableNativeShieldedToken`](https://github.com/OpenZeppelin/compact-contracts) preset.
+
+- **Only the owner mints and burns.** The owner is fixed at deploy as a commitment to `hash(owner's coin public key, secret nonce)`.
+- **The secret nonce is the key to minting.** The app keeps it in the browser's `localStorage`. If you clear the site's data, nobody can mint that token again.
+- **Every deployment is a new token.** The token type is derived from the contract address.
+
+### Versions
+
+Versions follow the pinned toolchain of the [official Midnight examples](https://github.com/midnightntwrk/midnight-examples).
 
 | Component | Version |
 | --- | --- |
+| Wallet SDK | `@midnightntwrk/wallet-sdk` 2.0.1 |
+| Ledger | `@midnightntwrk/ledger-v9` 1.0.2 |
+| Midnight.js | 5.0.1 |
+| Proof server | `midnightntwrk/proof-server` 9.0.2 |
 | Compact compiler | 0.36.1 (language 0.28, runtime 0.21.0) |
 | `@openzeppelin/compact-contracts` | 0.3.0 |
-| Midnight.js | 5.0.1 |
-| DApp Connector API | 4.0.1 |
-| Ledger | `@midnightntwrk/ledger-v9` 1.0.2 |
 
-## Deploying
+## Limits
 
-The app is a static site with no server code and no secrets.
-
-```bash
-pnpm build
-```
-
-Upload the `dist/` folder to any static host that serves over HTTPS. Asset paths are relative, so it works at a domain root or under a sub-path.
-
-The site serves the circuit files below from its own origin. The wallet needs them to prove a mint, and a deploy carries every verifier key.
-
-| File | Size |
-| --- | ---: |
-| `keys/mint.prover` | 43.0 MB |
-| `keys/*.verifier` (10 files) | 17 KB |
-| `zkir/*.bzkir` (10 files) | 13 KB |
-| `compiler/*.json` (2 files) | 17 KB |
-| **Circuit files** | **43.1 MB** |
-| WebAssembly and JavaScript | 26 MB |
-| **`dist/` in total** | **69 MB** |
-
-`keys/mint.prover` is the one large file. Check your host's per-file size limit before you choose it: some static hosts cap a single file at 25 MB.
-
-Only the prover key for `mint` is committed and served, because `mint` is the only circuit the UI proves. Compiling produces a prover key for every circuit (184 MB in all, with `burn.prover` at 86 MB). To serve another circuit, add it to `PROVED` in `scripts/copy-zk.mjs`.
-
-## Status
-
-Checked so far, without a real wallet:
-
-- All tests pass, and the production build runs from `pnpm preview`.
-- Mock mode works end to end in a browser.
-- The real deploy path runs in a browser up to the wallet: the contract's constructor runs, the verifier keys load, and a deploy transaction is handed to the wallet.
-
-Not yet checked on Preprod with a real wallet:
-
-- deploying, minting and paying out through a wallet extension,
-- that the wallet shows the minted token and accepts a multi-recipient `makeTransfer`,
-- how many recipients fit in one transaction.
-
-**Worked example on Preprod:** not recorded yet. When a payout has finalized, its transaction hash goes here.
-
-## Known limits
-
-- **Keep the tab open while a deploy finalizes.** If the page closes mid-deploy, the app cannot learn the new contract's address.
-- **One browser, one owner.** The minting secret lives in this browser. There is no export or import.
-- **No burning or ownership transfer in the UI.** The contract supports both. The app does not expose them.
+- **A proof of concept.** The wallet's seed and the token's minting secret are stored unencrypted in the browser. A real custodian keeps them in a vault or an HSM.
+- **Mainnet is offered, not proven.** Deploying, minting and paying out were run on Preprod. On Preview and Mainnet only syncing a new wallet was checked.
+- **One sending wallet, one transaction at a time.** Several sending wallets would pay in parallel; that was not tried.
+- **64 recipients per transaction** is the largest size tried. By size about 190 would fit in a block.
+- **Keep the tab open and in front during a payout.** Browsers slow background tabs down.
+- **No burning or ownership transfer in the UI.** The contract supports both.
 
 ## License
 
-[Apache-2.0](LICENSE). The contract file carries its own MIT header, as does the OpenZeppelin library it wraps.
+[Apache-2.0](LICENSE). The contract file carries its own MIT header, as does the OpenZeppelin library it wraps. The Midnight name and logo belong to their owners.

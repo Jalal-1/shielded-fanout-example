@@ -1,0 +1,15 @@
+.git
+.github
+.claude
+.dev-log
+.env
+.env.*
+!.env.example
+node_modules
+**/node_modules
+dist
+public
+pay-*.txt
+# Prover keys are large; only the one the page proves with is needed (see scripts/copy-zk.mjs).
+contract/managed/FanoutToken/keys/*.prover
+!contract/managed/FanoutToken/keys/mint.prover
