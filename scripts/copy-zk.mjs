@@ -29,14 +29,28 @@ const wanted = (dir, file) =>
   (dir === 'zkir' && file.endsWith('.bzkir')) ||
   (dir === 'keys' && (file.endsWith('.verifier') || PROVED.some((circuit) => file === `${circuit}.prover`)));
 
-rmSync(out, { recursive: true, force: true });
+// public/ is brought up to date in place: files are written over what is
+// there, and only files that no longer belong are removed. The folder itself
+// is never deleted. A running `pnpm dev` keeps a list of what is in public/,
+// and it loses track of files whose folder vanished and came back; it then
+// answers a request for a circuit file with the page itself, and proving fails.
 const rows = [];
 for (const dir of ['compiler', 'keys', 'zkir']) {
   mkdirSync(path.join(out, dir), { recursive: true });
-  for (const file of readdirSync(path.join(managed, dir)).sort()) {
-    if (!wanted(dir, file)) continue;
-    cpSync(path.join(managed, dir, file), path.join(out, dir, file));
-    rows.push([`${dir}/${file}`, statSync(path.join(out, dir, file)).size]);
+  const files = readdirSync(path.join(managed, dir))
+    .sort()
+    .filter((file) => wanted(dir, file));
+  for (const stale of readdirSync(path.join(out, dir))) {
+    if (!files.includes(stale)) rmSync(path.join(out, dir, stale), { force: true });
+  }
+  for (const file of files) {
+    const from = path.join(managed, dir, file);
+    const to = path.join(out, dir, file);
+    // A file that is already there, same size and no older, is left alone.
+    const current = existsSync(to) ? statSync(to) : null;
+    const source = statSync(from);
+    if (!current || current.size !== source.size || current.mtimeMs < source.mtimeMs) cpSync(from, to);
+    rows.push([`${dir}/${file}`, source.size]);
   }
 }
 
