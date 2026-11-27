@@ -66,6 +66,8 @@ export interface Backend {
   readToken(wallet: BrowserWallet, contractAddress: string): Promise<TokenInfo | null>;
   /** Ask the indexer about a transaction, waiting up to `maxWaitMs` for it. */
   checkTx(wallet: BrowserWallet, txId: string, maxWaitMs: number): Promise<TxOutcome>;
+  /** A transaction's bytes as hex, by its hash, or `null` when the indexer has none. */
+  txRaw(txHash: string): Promise<string | null>;
   /**
    * True when the indexer answers that it has no transaction with this
    * identifier. Throws when the indexer cannot be asked, so that "not there"

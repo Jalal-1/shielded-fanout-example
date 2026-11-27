@@ -241,15 +241,19 @@ dl.facts dd {
   text-align: right;
 }
 
-.paid {
+/* A single value in a state's colour. Whole table rows are not coloured: only their status cell is. */
+dd.paid,
+td.paid,
+p.paid {
   color: var(--ok);
 }
 
-.failed {
+dd.failed,
+td.failed {
   color: var(--error);
 }
 
-.unconfirmed {
+dd.unconfirmed {
   color: var(--warn);
 }
 
@@ -577,6 +581,28 @@ details.connections summary {
 
 .board .headline strong {
   font-weight: 500;
+}
+
+/* The box that makes test wallets: closed until asked for. */
+.test-wallets {
+  margin-bottom: 0.7rem;
+  padding: 0.55rem 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.test-wallets summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.test-wallets[open] summary {
+  margin-bottom: 0.7rem;
+  color: var(--text);
+}
+
+.test-wallets .command {
+  margin-bottom: 0.6rem;
 }
 
 /* The text box takes the height nothing else needs. */

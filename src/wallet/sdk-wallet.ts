@@ -24,6 +24,7 @@ import {
   type UnshieldedKeystore,
 } from 'fanout-wallet-sdk';
 import { V1Builder } from 'fanout-wallet-sdk';
+import { shieldedTip } from './tip-start';
 import { DustSync, V2Builder } from 'fanout-wallet-sdk';
 
 /** Where the wallet reads the chain, submits to it, and gets its proofs. */
@@ -127,6 +128,8 @@ export async function buildSdkWallet(
   endpoints: Endpoints,
   note: (step: string) => void = () => undefined,
   saved?: SavedWalletState,
+  /** True for a wallet whose seed was only just generated: it has no history to read (see tip-start.ts). */
+  brandNew = false,
 ): Promise<SdkWallet> {
   if (!/^[0-9a-fA-F]{64}$/.test(seedHex)) throw new Error('A seed is 64 hex characters.');
   const master = hexToBytes(seedHex);
@@ -176,8 +179,39 @@ export async function buildSdkWallet(
   const unshieldedConfig = shared as unknown as Parameters<typeof UnshieldedWallet>[0];
   const dustConfig = shared;
 
+  /**
+   * A shielded wallet with nothing in it. Normally it then reads every
+   * shielded coin the network has created. A brand-new wallet is instead
+   * given the coin tree as it stands now, so it has nothing to read.
+   */
+  const freshShielded = async () => {
+    const empty = await ShieldedWallet(shared).startWithSeed(seeds.shielded);
+    if (!brandNew) return empty;
+    try {
+      note('reading where the chain is now');
+      const tip = await shieldedTip(endpoints);
+      if (!tip) return empty;
+      // The SDK's own saved-state format, with three fields replaced. `writtenBy`
+      // is left out so that the SDK picks the wallet variant by protocol version.
+      const { writtenBy: _writtenBy, ...snapshot } = JSON.parse(await empty.serializeState()) as Record<string, unknown>;
+      const atTip = ShieldedWallet(shared).restore(
+        JSON.stringify({
+          ...snapshot,
+          state: tip.stateHex,
+          offset: String(tip.eventId),
+          protocolVersion: String(tip.protocolVersion),
+        }),
+      );
+      void empty.stop().catch(() => undefined);
+      return atTip;
+    } catch (error) {
+      note(`could not start at the chain tip (${String(error).slice(0, 80)}); reading the history instead`);
+      return empty;
+    }
+  };
+
   const fresh = async () => ({
-    shielded: await ShieldedWallet(shared).startWithSeed(seeds.shielded),
+    shielded: await freshShielded(),
     unshielded: await UnshieldedWallet(unshieldedConfig).startWithPublicKey(PublicKey.fromKeyStore(keystore)),
     dust: await FastDustWallet(dustConfig).startWithSeed(seeds.dust),
   });

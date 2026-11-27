@@ -83,10 +83,10 @@ Pick the network at the top left: **Preprod**, **Preview** or **Mainnet**. Each 
 
 | Step | What you do |
 | --- | --- |
-| **1. Wallet** | Create a wallet, or restore one from its seed. A new wallet reads the chain's history once, which takes several minutes (about six on Preprod). Progress is saved, so later visits take seconds. Back up the seed. |
+| **1. Wallet** | Create a wallet, or restore one from its seed. A wallet created here is ready in well under a minute. A restored wallet reads the chain's history once, which takes several minutes (about six on Preprod); progress is saved, so later visits take seconds. Back up the seed. |
 | **2. tNIGHT** | Copy the address shown, open the faucet, and request test tokens. On Mainnet there is no faucet: send NIGHT to the address. |
 | **3. tDUST** | Press **Generate tDUST**. Fees are paid in DUST, which is not bought or sent: your NIGHT generates it over time once it is registered. Registering is one transaction and pays for itself. |
-| **4. Token** | Deploy your own token contract (name, symbol, decimals), or use one already on the network by its address. Only the wallet that deployed a contract can mint it. |
+| **4. Token** | Deploy your own token contract (name, symbol, decimals), or use one already on the network by its address. Only the wallet that deployed a contract can mint it. Deploying costs about 11 tDUST: with one faucet payment of 5,000 tNIGHT that is four to five minutes after registering, and the page says how long is left. |
 | **5. Mint** | Mint an amount to your own wallet. |
 | **6. Pay** | Enter who to pay, and send. |
 
@@ -100,6 +100,8 @@ mn_shield-addr_preprod1x8...  29.5
 ```
 
 Paste it into the box or load it from a text file. The page checks every line and says what a press of the button will do, for example "2,000 wallets in 32 transactions, about 24 minutes". Keep the tab open and in front while it runs.
+
+**Nobody to pay yet?** Open "Make a batch of test wallets" above the list, choose how many and how much each should get, and the page fills the list for you. The wallets all come from one recovery phrase kept in your browser, by standard HD derivation, so wallet 1 is always the same wallet and a larger batch contains the smaller one.
 
 After you start, every line has a row with its state:
 
@@ -115,6 +117,7 @@ What you can do from there:
 - **Send the wallets not paid yet.** One button sends every failed and unsent line again, and never a paid one.
 - **Check the unconfirmed.** Asks the network again what became of those transactions.
 - **Filter** the rows by state, and see why each failed transaction failed.
+- **Check what each wallet received.** For test wallets made by the page: it opens every payout transaction with the key of each wallet it was meant to pay, and shows what that wallet received next to its line. About five wallets a second.
 - **Download the results (CSV):** every line with its state and transaction hash.
 - **Stop after this transaction** ends a run cleanly.
 
@@ -122,7 +125,9 @@ If the page is reloaded part-way, load the same list again: the page recognizes 
 
 ## Checking that recipients were paid
 
-A shielded payment is encrypted to its recipient, so the chain does not show who was paid. Whoever holds the recipients' keys can check. [`scripts/check-recipients.mjs`](scripts/check-recipients.mjs) derives recipient keys from one mnemonic or seed, reads transactions from the indexer, and tries each key on each transaction. No wallet sync is needed.
+A shielded payment is encrypted to its recipient, so the chain does not show who was paid. Whoever holds the recipients' keys can check.
+
+For test wallets made by the page, the button **Check what each wallet received** does this in the browser. From a terminal, [`scripts/check-recipients.mjs`](scripts/check-recipients.mjs) does the same for any recovery phrase or seed: it derives the recipient keys, reads transactions from the indexer, and tries each key on each transaction. No wallet sync is needed. The page shows the exact command for its own test wallets.
 
 ```bash
 # Make a test list: 2,000 addresses derived from one mnemonic, 1 token each
@@ -236,8 +241,10 @@ The site serves the circuit files the token contract needs. The one large file i
 | `src/fanout.ts` | The payout: one transfer, many recipients. Start here. |
 | `src/wallet/browser-wallet.ts` | The wallet's operations: register for DUST, pay, sign, submit. |
 | `src/wallet/sdk-wallet.ts` | Building the wallet from a seed with the wallet SDK, and the settings that make it sync quickly. |
+| `src/wallet/tip-start.ts` | Starting a newly created wallet where the chain is now, instead of reading its history. |
 | `src/wallet/wallet-store.ts` | Where the seed and the sync state are kept in the browser. |
 | `src/payout.ts` | Which line of a list was paid, which was not, and which can be sent again. |
+| `src/recipients.ts` | Test recipients from one recovery phrase, and the check of what each received. |
 | `src/PayoutPanel.tsx` | The payout screen. |
 | `src/App.tsx` | The rest of the user interface, and the loop that pays a list. |
 | `src/midnight/real-backend.ts` | Deploying and minting the token with Midnight.js. |

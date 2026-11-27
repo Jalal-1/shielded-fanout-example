@@ -18,6 +18,14 @@ export const loadSeed = (): string | null => localStorage.getItem(SEED_KEY);
 export const saveSeed = (seedHex: string): void => localStorage.setItem(SEED_KEY, seedHex);
 export const forgetSeed = (): void => localStorage.removeItem(SEED_KEY);
 
+// A wallet created here, as opposed to restored from a seed, is marked until
+// its state has been saved once. Such a wallet has no history on the chain, so
+// it may start where the chain is now (see tip-start.ts).
+const NEW_KEY = `shielded-fanout:wallet-is-new:${NETWORK_ID}`;
+export const markWalletAsNew = (): void => localStorage.setItem(NEW_KEY, '1');
+export const walletIsNew = (): boolean => localStorage.getItem(NEW_KEY) === '1';
+export const walletIsNoLongerNew = (): void => localStorage.removeItem(NEW_KEY);
+
 /** 32 random bytes as hex: a new wallet. */
 export function newSeed(): string {
   return Array.from(crypto.getRandomValues(new Uint8Array(32)), (byte) => byte.toString(16).padStart(2, '0')).join('');

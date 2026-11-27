@@ -34,6 +34,7 @@ CI runs the same three on every push.
 
 - **The wallet SDK is imported through `sdk/`**, a one-file workspace package. Importing its sub-paths directly makes the dev server bundle them separately, and the page then fails with an import cycle. After changing `sdk/`, delete `node_modules/.vite` and restart `pnpm dev`.
 - **DUST sync.** `src/wallet/sdk-wallet.ts` hands the wallet each network's Ledger 9 starting point and uses the SDK's event-less sync at a low anonymity level. Without those a new wallet takes hours to sync or a minute to re-check its DUST. The comments there give the measurements.
+- **Shielded sync.** The SDK finds a wallet's coins by trying its key on every shielded coin on the network, about 2 ms each in the browser: six minutes on Preprod. A newly created wallet skips that by starting from the indexer's collapsed coin tree (`src/wallet/tip-start.ts`). Only a wallet whose seed was generated in the page may do so; a restored wallet must read the history, or it would miss its coins.
 - **Editing source reloads the open page.** A payout in progress is cut short by a reload. Do not edit while one is running. A hot update also keeps the running wallet object, so after changing `src/wallet/` reload the page fully.
 - **The checker competes with the proof server.** `scripts/check-recipients.mjs` is processor-heavy. Run it between payouts, not during one.
 - **Background tabs are slow.** Browsers throttle timers in tabs that are not in front, which makes a sync or a payout crawl.

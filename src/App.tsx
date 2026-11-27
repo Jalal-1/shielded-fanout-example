@@ -28,7 +28,15 @@ import { loadPayoutRecord, loadToken, randomHex32, savePayoutRecord, saveToken, 
 import { BalanceLine, Elapsed } from './widgets';
 import logo from './assets/midnight-logo.svg';
 import { BrowserWallet, type WalletView } from './wallet/browser-wallet';
-import { forgetSeed, forgetWalletState, loadSeed, newSeed, saveSeed } from './wallet/wallet-store';
+import {
+  forgetSeed,
+  forgetWalletState,
+  loadSeed,
+  markWalletAsNew,
+  newSeed,
+  saveSeed,
+  walletIsNoLongerNew,
+} from './wallet/wallet-store';
 
 /** How long to wait for the indexer to report a transaction as finalized. */
 const FINALIZATION_WAIT_MS = 5 * 60_000;
@@ -72,7 +80,8 @@ function explainError(error: unknown): string {
   if (/failed to fetch|networkerror|load failed/i.test(text)) {
     return `A network request failed (${text}). Check that the proof server is running and that the Blockfrost project ID is right.`;
   }
-  if (/insufficient|not enough|dust/i.test(text) && /fee|dust/i.test(text)) {
+  // The wallet's own "not enough DUST" message is already a full sentence.
+  if (/insufficient funds/i.test(text) && /dust/i.test(text)) {
     return `The wallet could not pay the fee: ${text}`;
   }
   return text;
@@ -112,6 +121,7 @@ export function App({ refreshMs = 1000 }: AppProps) {
   const stopRequested = useRef(false);
   // Which step is on screen, once the user or the flow has chosen one.
   const [picked, setPicked] = useState<number | null>(null);
+  const furthestStep = useRef(1);
   const [busy, setBusyText] = useState<string | null>(null);
   const [busySince, setBusySince] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -302,10 +312,13 @@ export function App({ refreshMs = 1000 }: AppProps) {
   const createWallet = () => {
     const fresh = newSeed();
     saveSeed(fresh);
+    markWalletAsNew();
     setSeed(fresh);
   };
 
   const restoreWallet = (seedHex: string) => {
+    // A restored wallet may own coins already: it must read the history.
+    walletIsNoLongerNew();
     saveSeed(seedHex);
     setSeed(seedHex);
   };
@@ -315,6 +328,7 @@ export function App({ refreshMs = 1000 }: AppProps) {
     void (async () => {
       await wallet?.stop().catch(() => undefined);
       forgetSeed();
+      walletIsNoLongerNew();
       await forgetWalletState().catch(() => undefined);
       window.location.reload();
     })();
@@ -566,7 +580,10 @@ export function App({ refreshMs = 1000 }: AppProps) {
 
   // True while this page is working through a payout.
   const running = !!busy && !!record?.run && !record.run.endedAt && !record.run.stopped;
-  const night = view?.night ?? 0n;
+  // NIGHT the wallet holds, counting what is tied up in a transaction: registering for DUST
+  // spends the NIGHT and returns it, and for those few blocks the spendable balance reads zero.
+  const night = (view?.night ?? 0n) + (view?.nightPending ?? 0n);
+  const nightBusy = (view?.nightPending ?? 0n) > 0n;
   const noTokenYet =
     stored?.info && !missing ? `Reading your saved contract from ${NETWORK.label}…` : 'Deploy or join a contract first.';
   const walletLocked = !wallet ? 'Create or restore a wallet first.' : !synced && 'The wallet is still syncing.';
@@ -582,7 +599,11 @@ export function App({ refreshMs = 1000 }: AppProps) {
     { number: 6, tab: 'Pay', title: 'Pay wallets', done: false, locked: tokenLocked },
   ];
   // Until the user picks a tab, show the first step that still needs doing.
-  const suggested = list || running ? 6 : (steps.find((step) => !step.done)?.number ?? 6);
+  // It only ever moves forward: a balance that dips while a transaction is in flight must not
+  // send the page back to a step that was already done.
+  const nextStep = list || running ? 6 : (steps.find((step) => !step.done)?.number ?? 6);
+  furthestStep.current = Math.max(furthestStep.current, nextStep);
+  const suggested = furthestStep.current;
   const shown = picked ?? suggested;
   // Once the flow has reached the payout, stay there: a balance that reads
   // zero for a moment mid-payout must not flip the screen to another step.
@@ -644,7 +665,10 @@ export function App({ refreshMs = 1000 }: AppProps) {
             {!seed ? 'None yet' : !wallet ? 'Opening…' : synced ? 'Up to date' : view ? `Syncing, ${syncPercent}%` : 'Starting…'}
           </dd>
           <dt>{NIGHT}</dt>
-          <dd>{view ? formatAmount(view.night, NIGHT_DECIMALS) : '—'}</dd>
+          <dd>
+            {view ? formatAmount(night, NIGHT_DECIMALS) : '—'}
+            {nightBusy && <span className="hint"> in a transaction</span>}
+          </dd>
           <dt>{DUST}</dt>
           <dd>{view ? formatDust(dust) : '—'}</dd>
           {token && (
@@ -744,7 +768,10 @@ export function App({ refreshMs = 1000 }: AppProps) {
                   <dt>Send {NIGHT} to</dt>
                   <dd className="mono">{wallet.unshieldedAddress}</dd>
                   <dt>{NIGHT} in this wallet</dt>
-                  <dd data-testid="night">{view ? formatAmount(view.night, NIGHT_DECIMALS) : '…'}</dd>
+                  <dd data-testid="night">
+                    {view ? formatAmount(night, NIGHT_DECIMALS) : '…'}
+                    {nightBusy && <span className="hint"> (tied up in a transaction for a few blocks)</span>}
+                  </dd>
                 </dl>
                 <div className="row-actions">
                   {NETWORK.faucet && (
@@ -779,7 +806,9 @@ export function App({ refreshMs = 1000 }: AppProps) {
                   <dd>
                     {view.dustRegistered
                       ? `Yes. It is generating ${DUST}.`
-                      : `No. ${view.unregisteredNightCoins} ${NIGHT} coin(s) waiting to be registered.`}
+                      : nightBusy
+                        ? 'Being registered now. This takes a few blocks.'
+                        : `No. ${view.unregisteredNightCoins} ${NIGHT} coin(s) waiting to be registered.`}
                   </dd>
                 </dl>
                 {view.unregisteredNightCoins > 0 && (
@@ -787,12 +816,7 @@ export function App({ refreshMs = 1000 }: AppProps) {
                     Generate {DUST}
                   </button>
                 )}
-                {view.dustRegistered && dust < DEPLOY_COST_DUST && (
-                  <p className="hint">
-                    Deploying the token costs about {formatDust(DEPLOY_COST_DUST)} {DUST}. The balance grows every block;
-                    wait until it is above that.
-                  </p>
-                )}
+                {view.dustRegistered && dust < DEPLOY_COST_DUST && <DustWait dust={dust} needed={DEPLOY_COST_DUST} />}
               </>
             )}
           </Step>
@@ -835,11 +859,8 @@ export function App({ refreshMs = 1000 }: AppProps) {
             ) : (
               <>
                 <p>No contract yet. Deploy a new one, or use one that is already on {NETWORK.label}.</p>
-                {hasDust ? (
-                  <DeployForm disabled={!!busy} onDeploy={deploy} />
-                ) : (
-                  <p className="hint">Deploying needs {DUST}. See step 3.</p>
-                )}
+                {dust < DEPLOY_COST_DUST && <DustWait dust={dust} needed={DEPLOY_COST_DUST} />}
+                <DeployForm disabled={!!busy || dust < DEPLOY_COST_DUST} onDeploy={deploy} />
                 <JoinForm disabled={!!busy} onJoin={join} />
               </>
             )}
@@ -876,6 +897,7 @@ export function App({ refreshMs = 1000 }: AppProps) {
                   onSendUnpaid={sendUnpaid}
                   onCheck={checkUnconfirmed}
                   onNew={closeList}
+                  fetchTx={(txHash) => backend.txRaw(txHash)}
                 />
               ) : (
                 <PayoutInput
@@ -975,10 +997,35 @@ function SyncProgress({ view }: { view: WalletView }) {
         </label>
       ))}
       <p className="hint">
-        A new wallet reads the chain's history once, which takes several minutes (about six on Preprod). Progress is
-        saved in this browser, so later visits take seconds. Keep this tab in front while it runs.
+        A wallet restored from a seed reads the chain's history once, which takes several minutes (about six on
+        Preprod). Progress is saved in this browser, so later visits take seconds. Keep this tab in front while it
+        runs. A wallet created here skips this: it has no history to read.
       </p>
     </div>
+  );
+}
+
+/**
+ * Deploying needs more DUST than a freshly registered wallet has. This says how
+ * much is missing and, from how fast the balance has been growing while the
+ * page watched, about how long that will take.
+ */
+function DustWait({ dust, needed }: { dust: bigint; needed: bigint }) {
+  const first = useRef({ at: Date.now(), dust });
+  const seconds = (Date.now() - first.current.at) / 1000;
+  const gained = dust - first.current.dust;
+  // DUST per second, once there is enough of a stretch to judge by.
+  const rate = seconds >= 5 && gained > 0n ? Number(gained) / seconds : 0;
+  const minutes = rate > 0 ? Math.ceil(Number(needed - dust) / rate / 60) : null;
+  return (
+    <p className="hint" data-testid="dust-wait">
+      Deploying the token costs about {formatDust(needed)} {DUST} and this wallet has {formatDust(dust)}.{' '}
+      {dust === 0n
+        ? `Register your ${NIGHT} in step 3 first.`
+        : minutes === null
+          ? 'It grows with every block.'
+          : `It grows with every block: about ${minutes} more ${minutes === 1 ? 'minute' : 'minutes'}.`}
+    </p>
   );
 }
 

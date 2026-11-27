@@ -1,11 +1,12 @@
 // The payout screen: load a list, pay it, and see what became of every line.
 //
 //   PayoutInput   the list as text or from a file, checked line by line
+//   TestWallets   makes a batch of wallets to pay, when you have nobody to pay
 //   PayoutBoard   one row per line with its state, the transactions behind
 //                 them, and the buttons to send what is still unpaid
 //
 // The sending itself is in src/App.tsx (`payList`), on top of src/fanout.ts.
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { checkShieldedAddress, shieldedAddressPrefix } from './address';
 import { formatAmount, parseAmount } from './amounts';
 import type { TokenInfo } from './backend';
@@ -21,6 +22,14 @@ import {
   type LineStatus,
   type PayoutRecord,
 } from './payout';
+import {
+  deriveRecipients,
+  forgetTestRecipients,
+  loadTestRecipients,
+  receivedFrom,
+  saveTestRecipients,
+  type TestRecipients,
+} from './recipients';
 import { BalanceLine, Elapsed, duration } from './widgets';
 
 const STATUS_LABEL: Record<LineStatus, string> = {
@@ -133,6 +142,8 @@ export function PayoutInput(props: {
 
       <BalanceLine token={token} balance={balance} arriving={props.arriving} />
 
+      <TestWallets token={token} disabled={props.disabled} onList={setList} />
+
       <label className="grow">
         Who to pay: one wallet per line, its shielded address and then the amount
         <textarea
@@ -201,9 +212,124 @@ export function PayoutInput(props: {
   );
 }
 
+// ── Somebody to pay ──────────────────────────────────────────────────────────
+
+/** The largest batch offered: enough to try a long payout, small enough to make in a few seconds. */
+const MOST_TEST_WALLETS = 5000;
+
+/**
+ * Makes a batch of test wallets and puts them in the list.
+ *
+ * All of them come from one recovery phrase kept in this browser (see
+ * src/recipients.ts). Wallet 1 is always the same wallet, so a larger batch
+ * contains the smaller one, and the board can later check on chain what each
+ * of them received.
+ */
+function TestWallets(props: { token: TokenInfo; disabled: boolean; onList: (list: string) => void }) {
+  const { token } = props;
+  const [saved, setSaved] = useState<TestRecipients | null>(loadTestRecipients);
+  const [countText, setCountText] = useState('64');
+  const [amountText, setAmountText] = useState('1');
+  const [working, setWorking] = useState<string | null>(null);
+  const [phraseShown, setPhraseShown] = useState(false);
+
+  const count = Number(countText);
+  const countOk = /^\d+$/.test(countText.trim()) && count >= 1 && count <= MOST_TEST_WALLETS;
+  const amount = parseAmount(amountText, token.decimals);
+
+  const make = async () => {
+    if (!countOk || !amount.ok) return;
+    const next = saveTestRecipients(count, saved);
+    setSaved(next);
+    setWorking('Making the wallets…');
+    try {
+      const recipients = await deriveRecipients(next.mnemonic, count, (done) =>
+        setWorking(`Making the wallets: ${done.toLocaleString('en')} of ${count.toLocaleString('en')}…`),
+      );
+      props.onList(recipients.map((recipient) => `${recipient.address} ${amountText.trim()}`).join('\n'));
+    } finally {
+      setWorking(null);
+    }
+  };
+
+  const startOver = () => {
+    if (!window.confirm('Forget this recovery phrase? The test wallets made from it can then no longer be checked or opened.')) return;
+    forgetTestRecipients();
+    setSaved(null);
+    setPhraseShown(false);
+  };
+
+  const terminalCommand = `node scripts/check-recipients.mjs --mnemonic-file phrase.txt --count ${saved?.count ?? count} --network ${NETWORK_ID} --decimals ${token.decimals}`;
+
+  return (
+    <details className="test-wallets" data-testid="test-wallets">
+      <summary>Nobody to pay yet? Make a batch of test wallets</summary>
+      <div className="fields">
+        <label>
+          How many wallets
+          <input
+            inputMode="numeric"
+            value={countText}
+            data-testid="test-wallet-count"
+            onChange={(event) => setCountText(event.target.value)}
+          />
+        </label>
+        <label>
+          Amount for each, in {token.symbol}
+          <input inputMode="decimal" value={amountText} onChange={(event) => setAmountText(event.target.value)} />
+        </label>
+      </div>
+      {!countOk && <p className="field-error">Enter a number from 1 to {MOST_TEST_WALLETS.toLocaleString('en')}.</p>}
+      {!amount.ok && <p className="field-error">{amount.error}</p>}
+      <div className="row-actions">
+        <button
+          type="button"
+          className="secondary"
+          disabled={props.disabled || working !== null || !countOk || !amount.ok}
+          onClick={() => void make()}
+        >
+          {working ?? `Make ${countOk ? count.toLocaleString('en') : ''} test wallets and fill the list`}
+        </button>
+      </div>
+      {saved && (
+        <>
+          <p className="hint">
+            The test wallets all come from one recovery phrase, kept in this browser. After you pay them, the page can
+            check on chain what each one received. Save the phrase if you want to open the wallets anywhere else: on
+            a wallet app it opens wallet 1.
+          </p>
+          {phraseShown && <p className="mono command">{saved.mnemonic}</p>}
+          <div className="row-actions">
+            <button type="button" className="secondary" onClick={() => setPhraseShown(!phraseShown)}>
+              {phraseShown ? 'Hide the phrase' : 'Show the phrase'}
+            </button>
+            <button type="button" className="secondary" onClick={() => void navigator.clipboard?.writeText(saved.mnemonic)}>
+              Copy the phrase
+            </button>
+            <button type="button" className="secondary" disabled={props.disabled} onClick={startOver}>
+              Start over with a new phrase
+            </button>
+          </div>
+          <p className="hint">
+            The same check from a terminal, in a clone of the repository, with the phrase saved as{' '}
+            <code>phrase.txt</code>:
+          </p>
+          <p className="mono command">{terminalCommand}</p>
+        </>
+      )}
+    </details>
+  );
+}
+
 // ── What became of every line ────────────────────────────────────────────────
 
 type Filter = 'all' | 'paid' | 'problem' | 'unconfirmed' | 'todo';
+
+/** What the chain check found for one line: what its wallet received from the line's transaction, and whether that is what was sent. */
+interface Receipt {
+  readonly amount: bigint;
+  readonly ok: boolean;
+}
 
 const FILTERS: ReadonlyArray<{ key: Filter; label: string; matches: (status: LineStatus) => boolean }> = [
   { key: 'all', label: 'All', matches: () => true },
@@ -226,9 +352,17 @@ export function PayoutBoard(props: {
   onSendUnpaid: () => void;
   onCheck: () => void;
   onNew: () => void;
+  /** A transaction's bytes as hex, by its hash: what the chain check reads. */
+  fetchTx: (txHash: string) => Promise<string | null>;
 }) {
   const { token, payments, record, running } = props;
   const [filter, setFilter] = useState<Filter>('all');
+  // The chain check of the test wallets: what each line's wallet received, once looked at.
+  const [received, setReceived] = useState<ReadonlyMap<number, Receipt>>(new Map());
+  const [checking, setChecking] = useState<string | null>(null);
+  const [checkError, setCheckError] = useState<string | null>(null);
+  const stopChecking = useRef(false);
+  const [hasTestWallets] = useState(() => loadTestRecipients() !== null);
 
   const states = useMemo(() => lineStates(record, running), [record, running]);
   const counts = useMemo(() => countStates(states), [states]);
@@ -250,8 +384,82 @@ export function PayoutBoard(props: {
     .map((tx, index) => ({ tx, index }))
     .filter(({ tx }) => (tx.outcome === 'failed' || tx.outcome === 'unconfirmed') && tx.lines.some((line) => states[line - 1]?.tx === tx));
 
+  /**
+   * Check on chain what each test wallet received. For every paid transaction,
+   * its bytes are fetched and opened with the key of each wallet it was meant
+   * to pay. Lines whose address is not one of the test wallets are left alone:
+   * the page has no key for them.
+   */
+  const checkReceipts = async () => {
+    const saved = loadTestRecipients();
+    if (!saved) return;
+    stopChecking.current = false;
+    setCheckError(null);
+    try {
+      setChecking('Making the test wallets’ keys…');
+      const wallets = await deriveRecipients(saved.mnemonic, saved.count);
+      const byAddress = new Map(wallets.map((wallet) => [wallet.address, wallet]));
+      // Per paid transaction: the test wallets it paid, and the lines and total each was owed.
+      const work = record.transactions
+        .filter((tx) => tx.outcome === 'paid' && tx.txHash)
+        .map((tx) => {
+          const owed = new Map<string, { lines: number[]; amount: bigint }>();
+          for (const line of tx.lines) {
+            const payment = payments[line - 1];
+            if (!payment || states[line - 1]?.tx !== tx || !byAddress.has(payment.recipient)) continue;
+            const entry = owed.get(payment.recipient) ?? { lines: [], amount: 0n };
+            entry.lines.push(line);
+            entry.amount += payment.amount;
+            owed.set(payment.recipient, entry);
+          }
+          return { tx, owed };
+        })
+        .filter(({ owed }) => owed.size > 0);
+      const total = work.reduce((sum, { owed }) => sum + owed.size, 0);
+      if (total === 0) {
+        setCheckError('None of the paid lines is one of the test wallets made in this browser, so there is no key to check them with.');
+        return;
+      }
+      const results = new Map<number, Receipt>();
+      let done = 0;
+      for (const { tx, owed } of work) {
+        if (stopChecking.current) break;
+        setChecking(`Checked ${done.toLocaleString('en')} of ${total.toLocaleString('en')} wallets…`);
+        const raw = await props.fetchTx(tx.txHash!);
+        if (!raw) throw new Error(`The indexer does not have transaction ${tx.txHash!.slice(0, 12)}….`);
+        await receivedFrom(
+          raw,
+          [...owed.keys()].map((address) => byAddress.get(address)!),
+          token.tokenType,
+          (wallet, amount) => {
+            const entry = owed.get(wallet.address)!;
+            for (const line of entry.lines) results.set(line, { amount, ok: amount === entry.amount });
+            done++;
+            if (done % 4 === 0 || done === total) {
+              setReceived(new Map(results));
+              setChecking(`Checked ${done.toLocaleString('en')} of ${total.toLocaleString('en')} wallets…`);
+            }
+          },
+          () => stopChecking.current,
+        );
+      }
+      setReceived(new Map(results));
+    } catch (cause) {
+      setCheckError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setChecking(null);
+    }
+  };
+  const receipts = [...received.values()];
+  const receivedOk = receipts.filter((receipt) => receipt.ok).length;
+
   const download = () => {
-    const csv = resultsCsv(payments, states, (amount) => formatAmount(amount, token.decimals));
+    const csv = resultsCsv(
+      payments,
+      states,
+      (amount) => formatAmount(amount, token.decimals),
+      received.size > 0 ? (line) => received.get(line)?.amount : undefined,
+    );
     const link = document.createElement('a');
     link.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
     link.download = 'payout-results.csv';
@@ -264,6 +472,7 @@ export function PayoutBoard(props: {
     return payments.flatMap((payment, index) => {
       const state = states[index] ?? { status: 'not sent' as const };
       if (!matches(state.status)) return [];
+      const receipt = received.get(index + 1);
       return [
         <tr key={index} className={`line ${state.status.replace(' ', '-')}`}>
           <td className="num">{index + 1}</td>
@@ -277,10 +486,15 @@ export function PayoutBoard(props: {
           <td className="mono" title={state.tx?.txHash}>
             {state.tx?.txHash ? `${state.tx.txHash.slice(0, 12)}…` : ''}
           </td>
+          {received.size > 0 && (
+            <td className={`num ${receipt ? (receipt.ok ? 'paid' : 'failed') : ''}`}>
+              {receipt ? `${formatAmount(receipt.amount, token.decimals)} ${receipt.ok ? '✓' : '✗'}` : ''}
+            </td>
+          )}
         </tr>,
       ];
     });
-  }, [payments, states, filter, token.decimals]);
+  }, [payments, states, filter, token.decimals, received]);
 
   const allPaid = counts.paid === total;
   return (
@@ -348,6 +562,17 @@ export function PayoutBoard(props: {
                 Check the {counts.unconfirmed} unconfirmed
               </button>
             )}
+            {hasTestWallets && counts.paid > 0 && (
+              <button
+                type="button"
+                className="secondary"
+                disabled={checking !== null}
+                onClick={() => void checkReceipts()}
+                data-testid="check-receipts"
+              >
+                Check what each wallet received
+              </button>
+            )}
             <button type="button" className="secondary" onClick={download}>
               Download the results (CSV)
             </button>
@@ -357,6 +582,21 @@ export function PayoutBoard(props: {
           </>
         )}
       </div>
+      {checking !== null && (
+        <p className="status" role="status" data-testid="check-progress">
+          {checking}{' '}
+          <button type="button" className="link" onClick={() => (stopChecking.current = true)}>
+            Stop
+          </button>
+        </p>
+      )}
+      {checkError && <p className="field-error">{checkError}</p>}
+      {checking === null && received.size > 0 && (
+        <p className={receivedOk === receipts.length ? 'paid' : 'field-error'} data-testid="check-result">
+          Checked on chain with the test wallets' own keys: {receivedOk.toLocaleString('en')} of{' '}
+          {receipts.length.toLocaleString('en')} lines received exactly what they were sent.
+        </p>
+      )}
       {!running && unpaid.length > 0 && overBalance && (
         <p className="field-error">
           The unpaid lines add up to {show(unpaidTotal)}, more than the {show(props.balance)} you can spend.
@@ -391,6 +631,7 @@ export function PayoutBoard(props: {
               <th className="num">Amount</th>
               <th>Status</th>
               <th>Transaction</th>
+              {received.size > 0 && <th className="num">Received on chain</th>}
             </tr>
           </thead>
           <tbody>{rows}</tbody>

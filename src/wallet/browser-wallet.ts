@@ -29,8 +29,9 @@ import {
 } from 'fanout-wallet-sdk';
 import { filter, firstValueFrom, timeout, type Observable } from 'rxjs';
 import { diag } from '../diag';
+import { DUST } from '../network';
 import { buildSdkWallet, type Endpoints, type SavedWalletState, type SdkWallet } from './sdk-wallet';
-import { loadWalletState, saveWalletState } from './wallet-store';
+import { loadWalletState, saveWalletState, walletIsNew, walletIsNoLongerNew } from './wallet-store';
 
 /** One shielded payment: who, and how much in the token's smallest unit. */
 export interface ShieldedPayment {
@@ -43,8 +44,14 @@ export interface WalletView {
   readonly synced: boolean;
   /** How far each part of the wallet has caught up with the chain, 0 to 1. */
   readonly progress: { readonly shielded: number; readonly dust: number; readonly unshielded: number };
-  /** Unshielded NIGHT, in its smallest unit (6 decimals). */
+  /** Unshielded NIGHT that can be spent now, in its smallest unit (6 decimals). */
   readonly night: bigint;
+  /**
+   * NIGHT tied up in a transaction that has not finalized yet. Registering for
+   * DUST spends the wallet's NIGHT and returns it, so for a few blocks all of
+   * it is here and `night` reads zero.
+   */
+  readonly nightPending: bigint;
   /** DUST available right now, in its smallest unit (15 decimals). */
   readonly dust: bigint;
   /** True once the wallet's NIGHT has been registered to generate DUST. */
@@ -118,10 +125,18 @@ export class BrowserWallet {
     // The leading number is the saved state's layout: raise it to make every browser start afresh.
     const stateKey = await fingerprint(`2:${endpoints.networkId}:${seedHex}`);
     const saved = await loadWalletState(stateKey).catch(() => undefined);
-    const sdk = await buildSdkWallet(seedHex, endpoints, note, saved);
+    // A wallet created a moment ago has no history, and need not read the chain's.
+    const brandNew = !saved && walletIsNew();
+    const sdk = await buildSdkWallet(seedHex, endpoints, note, saved, brandNew);
     const wallet = new BrowserWallet(sdk, endpoints, stateKey);
     note('starting to sync with the chain');
     await sdk.facade.start(sdk.seeds);
+    if (brandNew) {
+      // Saved at once: from here on the wallet has a state of its own to resume
+      // from, and is never again treated as having no history.
+      await wallet.save();
+      walletIsNoLongerNew();
+    }
     // Save progress regularly, so a reload continues where this left off.
     wallet.saveTimer = setInterval(() => void wallet.save(), 60_000);
     return wallet;
@@ -145,6 +160,9 @@ export class BrowserWallet {
         unshielded: fraction(state.unshielded.progress),
       },
       night: state.unshielded.balances[night] ?? 0n,
+      nightPending: state.unshielded.pendingCoins
+        .filter((coin) => coin.utxo.type === night)
+        .reduce((sum, coin) => sum + coin.utxo.value, 0n),
       dust: state.dust.balance(new Date()),
       dustRegistered: nightCoins.length > 0 && unregistered === 0,
       unregisteredNightCoins: unregistered,
@@ -272,17 +290,29 @@ export class BrowserWallet {
   /**
    * Run a step that pays a fee, waiting if the wallet's DUST is still tied up.
    *
-   * A fee spends the wallet's DUST coin and gets a new one back. Until the
-   * previous transaction is finalized that new coin cannot be spent, and the
-   * SDK answers "Insufficient Funds ... dust". That clears by itself within a
-   * few blocks, so wait and try again rather than fail.
+   * A fee spends one of the wallet's DUST coins and gets a new one back. Until
+   * the previous transaction is finalized that coin cannot be spent, and the
+   * SDK answers that its coin selection "declined the remaining dust coin(s)".
+   * That clears by itself within a few blocks, so wait and try again.
+   *
+   * Not having enough DUST is a different answer ("could not balance dust")
+   * and waiting a few blocks does not cure it: say so at once, with the amount
+   * the wallet has.
    */
   private async whenDustIsFree<T>(step: () => Promise<T>): Promise<T> {
     for (let attempt = 1; ; attempt++) {
       try {
         return await step();
       } catch (error) {
-        const dustBusy = /insufficient funds/i.test(String(error)) && /dust/i.test(String(error));
+        const text = String(error);
+        if (/could not balance dust/i.test(text)) {
+          const state = await firstValueFrom(this.sdk.facade.state());
+          const have = Number(state.dust.balance(new Date()) / 10n ** 12n) / 1000;
+          throw new Error(
+            `Not enough ${DUST} for this transaction's fee: the wallet has ${have.toFixed(3)} right now. ${DUST} grows with every block, so wait a little and try again.`,
+          );
+        }
+        const dustBusy = /declined the remaining/i.test(text) && /dust/i.test(text);
         if (!dustBusy || attempt >= 12) throw error;
         diag(`wallet: DUST is still tied up in the previous transaction; trying again in 6 s (${attempt}/12)`);
         await new Promise((resolve) => setTimeout(resolve, 6_000));

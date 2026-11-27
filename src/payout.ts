@@ -164,12 +164,14 @@ export function lineRanges(lines: readonly number[]): string {
 
 /**
  * The whole list with what became of each line, as CSV text: line, address,
- * amount, status, transaction hash, note.
+ * amount, status, transaction hash, note. When the recipients were checked on
+ * chain, `received` adds what each line's wallet was found to have received.
  */
 export function resultsCsv(
   payments: readonly Payment[],
   states: readonly LineState[],
   showAmount: (amount: bigint) => string,
+  received?: (line: number) => bigint | undefined,
 ): string {
   const cell = (text: string) => (/[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text);
   const rows = payments.map((payment, index) => {
@@ -181,9 +183,11 @@ export function resultsCsv(
       state?.status ?? 'not sent',
       state?.tx?.txHash ?? '',
       state?.tx?.note ?? '',
+      ...(received ? [((amount) => (amount === undefined ? '' : showAmount(amount)))(received(index + 1))] : []),
     ]
       .map(cell)
       .join(',');
   });
-  return ['line,address,amount,status,transaction,note', ...rows].join('\n') + '\n';
+  const header = `line,address,amount,status,transaction,note${received ? ',received on chain' : ''}`;
+  return [header, ...rows].join('\n') + '\n';
 }

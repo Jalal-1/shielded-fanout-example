@@ -299,6 +299,20 @@ export function createRealBackend(endpoints: Endpoints): Backend {
       }
     },
 
+    async txRaw(txHash: string): Promise<string | null> {
+      const response = await fetch(endpoints.indexer, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ query: `{ transactions(offset: {hash: "${txHash}"}) { raw } }` }),
+        signal: AbortSignal.timeout(30_000),
+      });
+      const body = (await response.json()) as { data?: { transactions?: { raw: string }[] }; errors?: { message: string }[] };
+      if (!response.ok || body.errors) {
+        throw new Error(`The indexer could not serve the transaction: ${body.errors?.[0]?.message ?? response.status}`);
+      }
+      return body.data?.transactions?.[0]?.raw ?? null;
+    },
+
     async txIsAbsent(txId: string): Promise<boolean> {
       // Asked directly, so that "the indexer has no such transaction" (an empty
       // list) cannot be confused with "the indexer could not be reached" (an error).
