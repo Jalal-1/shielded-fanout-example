@@ -171,6 +171,13 @@ table.lines th,
   color: var(--muted);
 }
 
+/* The way back to the payout from any other step. */
+.info .to-payout {
+  align-self: flex-start;
+  padding: 0.3rem 0.8rem;
+  font-size: 0.85rem;
+}
+
 .now {
   display: grid;
   gap: 0.4rem;
@@ -643,6 +650,29 @@ details.connections summary {
 .board progress {
   margin-bottom: 0.7rem;
   accent-color: var(--ok);
+}
+
+/* The way back to a payout whose list is not on screen (src/PayoutResume.tsx). */
+.resume p {
+  max-width: 72ch;
+}
+
+/* Its file picker is opened by a button, so the browser's own control is not shown. */
+.resume input[type='file'] {
+  display: none;
+}
+
+.resume textarea {
+  min-height: 8rem;
+  margin-bottom: 0.6rem;
+}
+
+.resume .test-wallets {
+  max-width: 44rem;
+}
+
+.resume .leave {
+  margin: 0.9rem 0 0;
 }
 
 .troubles {

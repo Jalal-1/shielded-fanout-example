@@ -121,7 +121,7 @@ What you can do from there:
 - **Download the results (CSV):** every line with its state and transaction hash.
 - **Stop after this transaction** ends a run cleanly.
 
-If the page is reloaded part-way, load the same list again: the page recognizes it and continues where it stopped. Progress is stored by line number, without addresses or amounts.
+**Coming back to a payout.** While a payout runs, the browser asks before the page is closed or reloaded, because that cuts the run short. If it happens anyway, nothing is lost and nobody is paid twice. Progress is stored by line number, without addresses or amounts, so the Pay step then shows where the payout stands and asks for its list again: load the file, paste it, or, for test wallets made by the page, have them made again. The page checks that it is the same list, shows every line in its state, and one button sends what is not paid yet. From any other step, "Go to the payout" in the left panel leads back there. A list you closed with lines still unpaid stays in memory and opens again with one button.
 
 ## Checking that recipients were paid
 
@@ -246,10 +246,11 @@ The site serves the circuit files the token contract needs. The one large file i
 | `src/payout.ts` | Which line of a list was paid, which was not, and which can be sent again. |
 | `src/recipients.ts` | Test recipients from one recovery phrase, and the check of what each received. |
 | `src/PayoutPanel.tsx` | The payout screen. |
+| `src/PayoutResume.tsx` | The way back to a payout whose list is no longer on screen. |
 | `src/App.tsx` | The rest of the user interface, and the loop that pays a list. |
 | `src/midnight/real-backend.ts` | Deploying and minting the token with Midnight.js. |
 | `src/network.ts` | The three networks and where the page finds them. |
-| `src/address.ts`, `src/amounts.ts` | Checking a shielded address; converting typed amounts. |
+| `src/address.ts`, `src/amounts.ts`, `src/list.ts` | Checking a shielded address; converting typed amounts; reading a list of both. |
 | `src/storage.ts` | What is kept in `localStorage`: your token and the progress of a payout. |
 | `contract/` | The token contract, its witness, and the compiled output in `managed/`. |
 | `sdk/` | One entry point for the wallet SDK, so the dev server bundles it once. |
@@ -272,7 +273,7 @@ The site serves the circuit files the token contract needs. The one large file i
 
 ### Tests
 
-`pnpm test` covers what can be checked without a chain: address and amount parsing, cutting a list into transactions, the per-line payout record (what is safe to send again, what a reload does to it), and the compiled contract run in memory (the owner can mint, nobody else can, and the token type the app computes is the one the contract mints).
+`pnpm test` covers what can be checked without a chain: address, amount and list parsing, cutting a list into transactions, the per-line payout record (what is safe to send again, what a reload does to it, which list may continue it), and the compiled contract run in memory (the owner can mint, nobody else can, and the token type the app computes is the one the contract mints).
 
 Nothing in the repository pretends to be a wallet or a chain. Sending a transaction is tested by sending one on a test network.
 

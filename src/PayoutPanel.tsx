@@ -5,12 +5,15 @@
 //   PayoutBoard   one row per line with its state, the transactions behind
 //                 them, and the buttons to send what is still unpaid
 //
+// src/PayoutResume.tsx is the way back to a payout whose list is no longer on
+// screen.
 // The sending itself is in src/App.tsx (`payList`), on top of src/fanout.ts.
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { checkShieldedAddress, shieldedAddressPrefix } from './address';
+import { shieldedAddressPrefix } from './address';
 import { formatAmount, parseAmount } from './amounts';
 import type { TokenInfo } from './backend';
 import { RECIPIENTS_PER_TRANSACTION, SECONDS_PER_TRANSACTION, totalOf, type Payment } from './fanout';
+import { parseList } from './list';
 import { NETWORK_ID } from './network';
 import {
   countStates,
@@ -42,7 +45,7 @@ const STATUS_LABEL: Record<LineStatus, string> = {
 };
 
 /** "a list of 3 things" needs its noun to agree. */
-const wallets = (count: number): string => `${count.toLocaleString('en')} ${count === 1 ? 'wallet' : 'wallets'}`;
+export const wallets = (count: number): string => `${count.toLocaleString('en')} ${count === 1 ? 'wallet' : 'wallets'}`;
 
 // ── The list ─────────────────────────────────────────────────────────────────
 
@@ -55,7 +58,8 @@ export function PayoutInput(props: {
   record: PayoutRecord | undefined;
   /** Pay `payments`. `resume` is true when they are the list `record` belongs to. */
   onStart: (payments: Payment[], fingerprint: string, resume: boolean) => void;
-  onDiscardRecord: () => void;
+  /** Back to the payout in progress, leaving this form. */
+  onBack: () => void;
 }) {
   const { token, record, balance } = props;
 
@@ -64,25 +68,10 @@ export function PayoutInput(props: {
 
   // One recipient per line: "address amount". One line pays one wallet, many lines pay many.
   // Checked once per edit, not on every refresh of the page: a list can be thousands of lines.
-  const { count, firstProblem, payments } = useMemo(() => {
-    const lines = list
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => line !== '');
-    const parsed = lines.map((line, index) => {
-      const [address = '', amountText = ''] = line.split(/[\s,;]+/);
-      const amount = parseAmount(amountText, token.decimals);
-      const problem =
-        checkShieldedAddress(address, NETWORK_ID) ??
-        (amountText === '' ? 'Add the amount after the address.' : amount.ok ? null : amount.error);
-      return { index, address, amount, problem };
-    });
-    const firstProblem = parsed.find((line) => line.problem !== null);
-    const payments: Payment[] = firstProblem
-      ? []
-      : parsed.flatMap((line) => (line.amount.ok ? [{ recipient: line.address, amount: line.amount.value }] : []));
-    return { count: lines.length, firstProblem, payments };
-  }, [list, token.decimals]);
+  const { count, firstProblem, payments } = useMemo(
+    () => parseList(list, token.decimals, NETWORK_ID),
+    [list, token.decimals],
+  );
   const ready = count > 0 && !firstProblem;
 
   // Is this the list a payout is already in progress for?
@@ -129,13 +118,13 @@ export function PayoutInput(props: {
       {record && recordCounts && (
         <div className="notice" data-testid="payout-in-progress">
           <p>
-            <strong>A payout list is in progress in this browser:</strong>{' '}
+            <strong>Another payout is in progress in this browser:</strong>{' '}
             {recordCounts.paid.toLocaleString('en')} of {wallets(record.lineCount)} paid
             {recordCounts.unconfirmed > 0 && `, ${recordCounts.unconfirmed.toLocaleString('en')} unconfirmed`}.{' '}
-            Load the same list to see every line and to send the rest. Nobody is paid twice.
+            Paying a different list here replaces its record.
           </p>
-          <button type="button" className="secondary" disabled={props.disabled} onClick={props.onDiscardRecord}>
-            Forget that list
+          <button type="button" className="secondary" onClick={props.onBack}>
+            Back to the payout in progress
           </button>
         </div>
       )}
@@ -639,38 +628,45 @@ export function PayoutBoard(props: {
         {rows.length === 0 && <p className="hint">No lines in this state.</p>}
       </div>
 
-      <details className="transactions">
-        <summary>The transactions ({record.transactions.length})</summary>
-        <div className="table-wrap">
-          <table className="lines">
-            <thead>
-              <tr>
-                <th className="num">#</th>
-                <th>Lines</th>
-                <th className="num">Proving</th>
-                <th className="num">Finalizing</th>
-                <th>Outcome</th>
-                <th>Transaction hash</th>
-              </tr>
-            </thead>
-            <tbody>
-              {record.transactions.map((tx, index) => (
-                <tr key={index} className={`line ${tx.outcome}`}>
-                  <td className="num">{index + 1}</td>
-                  <td>{lineRanges(tx.lines)}</td>
-                  <td className="num">{tx.buildMs === undefined ? '' : `${Math.round(tx.buildMs / 1000)} s`}</td>
-                  <td className="num">{tx.finalizeMs === undefined ? '' : `${Math.round(tx.finalizeMs / 1000)} s`}</td>
-                  <td className="state" title={tx.note}>
-                    {tx.outcome}
-                  </td>
-                  <td className="mono">{tx.txHash ?? ''}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </details>
+      <PayoutTransactions record={record} />
     </div>
+  );
+}
+
+/** Every transaction of a payout: the lines it carried, how long it took and what became of it. */
+export function PayoutTransactions({ record }: { record: PayoutRecord }) {
+  return (
+    <details className="transactions">
+      <summary>The transactions ({record.transactions.length})</summary>
+      <div className="table-wrap">
+        <table className="lines">
+          <thead>
+            <tr>
+              <th className="num">#</th>
+              <th>Lines</th>
+              <th className="num">Proving</th>
+              <th className="num">Finalizing</th>
+              <th>Outcome</th>
+              <th>Transaction hash</th>
+            </tr>
+          </thead>
+          <tbody>
+            {record.transactions.map((tx, index) => (
+              <tr key={index} className={`line ${tx.outcome}`}>
+                <td className="num">{index + 1}</td>
+                <td>{lineRanges(tx.lines)}</td>
+                <td className="num">{tx.buildMs === undefined ? '' : `${Math.round(tx.buildMs / 1000)} s`}</td>
+                <td className="num">{tx.finalizeMs === undefined ? '' : `${Math.round(tx.finalizeMs / 1000)} s`}</td>
+                <td className="state" title={tx.note}>
+                  {tx.outcome}
+                </td>
+                <td className="mono">{tx.txHash ?? ''}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </details>
   );
 }
 

@@ -151,6 +151,21 @@ export async function fingerprintOf(payments: readonly Payment[]): Promise<strin
   return Array.from(new Uint8Array(digest).slice(0, 16), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
+/**
+ * Why a list cannot be the one `record` belongs to, in a sentence, or null
+ * when it is that list. A payout is only ever continued with the very list it
+ * was started with: line 7 of the record must be line 7 of the list.
+ */
+export function listMismatch(record: PayoutRecord, lineCount: number, fingerprint: string): string | null {
+  if (lineCount !== record.lineCount) {
+    return `That list has ${lineCount.toLocaleString('en')} ${lineCount === 1 ? 'line' : 'lines'}. The payout in progress is for a list of ${record.lineCount.toLocaleString('en')}.`;
+  }
+  if (fingerprint !== record.fingerprint) {
+    return 'That list has the right number of lines, but an address, an amount or the order differs from the list in progress.';
+  }
+  return null;
+}
+
 /** 1,2,3,7,8 becomes "1-3, 7-8": a short way to name many lines. */
 export function lineRanges(lines: readonly number[]): string {
   const runs: Array<[number, number]> = [];

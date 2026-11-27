@@ -5,6 +5,7 @@
 //   src/fanout.ts                  the payout in a dozen lines
 //   src/payout.ts                  which line of a list was paid, and which was not
 //   src/PayoutPanel.tsx            the payout screen
+//   src/PayoutResume.tsx           the way back to a payout whose list is not on screen
 //   src/midnight/real-backend.ts   deploying and minting the token (Midnight.js)
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import type { FacadeState } from 'fanout-wallet-sdk';
@@ -24,6 +25,7 @@ import {
   type PayoutTx,
 } from './payout';
 import { PayoutBoard, PayoutCounts, PayoutInput } from './PayoutPanel';
+import { PayoutResume } from './PayoutResume';
 import { loadPayoutRecord, loadToken, randomHex32, savePayoutRecord, saveToken, type StoredToken } from './storage';
 import { BalanceLine, Elapsed } from './widgets';
 import logo from './assets/midnight-logo.svg';
@@ -117,6 +119,11 @@ export function App({ refreshMs = 1000 }: AppProps) {
   // record of which of its lines went into which transaction (stored).
   const [list, setList] = useState<Payment[] | null>(null);
   const [record, setRecord] = useState<PayoutRecord | undefined>();
+  // Whether the list is on screen. A list that was closed with lines still unpaid
+  // stays in memory, so going back to it does not mean loading it again.
+  const [listOpen, setListOpen] = useState(false);
+  // True once the user chose to enter a different list than the one in progress.
+  const [another, setAnother] = useState(false);
   const [stopping, setStopping] = useState(false);
   const stopRequested = useRef(false);
   // Which step is on screen, once the user or the flow has chosen one.
@@ -558,8 +565,17 @@ export function App({ refreshMs = 1000 }: AppProps) {
     const start: PayoutRecord =
       resume && record ? record : { fingerprint, lineCount: payments.length, transactions: [] };
     setList(payments);
+    setListOpen(true);
+    setAnother(false);
     remember(start);
     if (unpaidLines(start).length > 0) void payList(payments, start);
+  };
+
+  /** Back to the payout in progress, with its list loaded again. Nothing is sent until the user asks. */
+  const reopenList = (payments?: Payment[]) => {
+    if (payments) setList(payments);
+    setListOpen(true);
+    setAnother(false);
   };
 
   const sendUnpaid = () => {
@@ -571,18 +587,34 @@ export function App({ refreshMs = 1000 }: AppProps) {
       if (wallet && record) remember(await settleUnconfirmed(wallet, record, 15_000));
     });
 
-  /** Leave the list. Its record is kept while any of it is unpaid, so loading it again continues it. */
+  /**
+   * Leave the list. While any of it is unpaid, its record is kept and the list
+   * stays in memory, so the payout can be opened again and continued.
+   */
   const closeList = () => {
-    setList(null);
-    if (record && lineStates(record, false).every((state) => state.status === 'paid')) remember(undefined);
+    setListOpen(false);
+    if (record && lineStates(record, false).every((state) => state.status === 'paid')) {
+      setList(null);
+      remember(undefined);
+    }
   };
 
   const discardRecord = () => {
-    if (window.confirm('Forget that list? This page will no longer know which of its lines were paid.')) remember(undefined);
+    if (!window.confirm('Forget this payout? This page will no longer know which lines of its list were paid.')) return;
+    setList(null);
+    setListOpen(false);
+    remember(undefined);
   };
 
   // True while this page is working through a payout.
   const running = !!busy && !!record?.run && !record.run.endedAt && !record.run.stopped;
+  // Closing or reloading the page cuts a run short, so the browser asks first.
+  useEffect(() => {
+    if (!running) return;
+    const ask = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener('beforeunload', ask);
+    return () => window.removeEventListener('beforeunload', ask);
+  }, [running]);
   // NIGHT the wallet holds, counting what is tied up in a transaction: registering for DUST
   // spends the NIGHT and returns it, and for those few blocks the spendable balance reads zero.
   const night = (view?.night ?? 0n) + (view?.nightPending ?? 0n);
@@ -599,8 +631,8 @@ export function App({ refreshMs = 1000 }: AppProps) {
     { number: 3, tab: DUST, title: `Generate ${DUST}`, done: hasDust, locked: walletLocked || (night === 0n && `Get ${NIGHT} first.`) },
     { number: 4, tab: 'Token', title: 'Your token contract', done: !!token, locked: walletLocked },
     { number: 5, tab: 'Mint', title: 'Mint', done: !!token && (balance > 0n || arriving > 0n), locked: tokenLocked },
-    // A list that is loaded stays on screen whatever the balances do: its progress must never be hidden.
-    { number: 6, tab: 'Pay', title: 'Pay wallets', done: false, locked: list ? false : tokenLocked },
+    // A payout, loaded or waiting for its list, stays on screen whatever the balances do: its progress must never be hidden.
+    { number: 6, tab: 'Pay', title: 'Pay wallets', done: false, locked: (list || record) && token ? false : tokenLocked },
   ];
   // Until the user picks a tab, show the first step that still needs doing.
   // It only ever moves forward: a balance that dips while a transaction is in flight must not
@@ -697,6 +729,12 @@ export function App({ refreshMs = 1000 }: AppProps) {
           <>
             <h2>Payout list</h2>
             <PayoutCounts record={record} running={running} />
+            {/* From any other step, one press leads back to the payout. */}
+            {shown !== 6 && (
+              <button type="button" className="secondary to-payout" onClick={() => setPicked(6)} data-testid="to-payout">
+                {running ? 'Watch the payout' : 'Go to the payout'}
+              </button>
+            )}
           </>
         )}
 
@@ -888,7 +926,7 @@ export function App({ refreshMs = 1000 }: AppProps) {
 
           <Step step={steps[5]!} shown={shown}>
             {token &&
-              (list && record ? (
+              (list && record && listOpen ? (
                 <PayoutBoard
                   token={token}
                   payments={list}
@@ -906,6 +944,18 @@ export function App({ refreshMs = 1000 }: AppProps) {
                   onNew={closeList}
                   fetchTx={(txHash) => backend.txRaw(txHash)}
                 />
+              ) : record && !another ? (
+                <PayoutResume
+                  token={token}
+                  record={record}
+                  inMemory={!!list}
+                  busy={!!busy}
+                  onReopen={() => reopenList()}
+                  onOpen={reopenList}
+                  onCheck={checkUnconfirmed}
+                  onAnother={() => setAnother(true)}
+                  onForget={discardRecord}
+                />
               ) : (
                 <PayoutInput
                   token={token}
@@ -914,7 +964,7 @@ export function App({ refreshMs = 1000 }: AppProps) {
                   disabled={!!busy}
                   record={record}
                   onStart={startList}
-                  onDiscardRecord={discardRecord}
+                  onBack={() => setAnother(false)}
                 />
               ))}
           </Step>

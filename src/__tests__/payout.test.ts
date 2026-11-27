@@ -5,6 +5,7 @@ import {
   fingerprintOf,
   lineRanges,
   lineStates,
+  listMismatch,
   resultsCsv,
   unpaidLines,
   withTx,
@@ -104,5 +105,21 @@ describe('helpers', () => {
       '2,addr2,250,failed,hash-2,"It could not be built: a, ""b"""',
       '',
     ]);
+  });
+});
+
+describe('continuing a payout with its list loaded again', () => {
+  const inProgress: PayoutRecord = { fingerprint: 'abc', lineCount: 500, transactions: [tx(1, 64, 'paid')] };
+
+  it('accepts the list the record belongs to', () => {
+    expect(listMismatch(inProgress, 500, 'abc')).toBeNull();
+  });
+
+  it('refuses a list of another length, and says both lengths', () => {
+    expect(listMismatch(inProgress, 64, 'abc')).toMatch(/64 lines.*list of 500/);
+  });
+
+  it('refuses a list of the same length whose content differs', () => {
+    expect(listMismatch(inProgress, 500, 'abd')).toMatch(/an address, an amount or the order differs/);
   });
 });
