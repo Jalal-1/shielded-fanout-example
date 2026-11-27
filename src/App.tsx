@@ -1016,6 +1016,9 @@ function NetworkSwitch({ disabled }: { disabled: boolean }) {
   );
 }
 
+/** True when the page itself is served from this machine, as with `pnpm dev`. */
+const LOCAL_PAGE = ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname);
+
 /** The command that starts a proof server on the visitor's own machine. */
 const PROOF_SERVER_COMMAND =
   'docker run --rm -p 127.0.0.1:6300:6300 midnightntwrk/proof-server:9.0.2 midnight-proof-server --job-capacity 1024';
@@ -1048,6 +1051,15 @@ function ProofServerSetting(props: { proofServer: string; up: boolean | null }) 
           Copy the command
         </button>
       </div>
+      {props.up === false && !LOCAL_PAGE && (
+        <p className="hint">
+          <strong>Running, but still not answering?</strong> This page is on the internet and the proof server is on
+          your computer, and browsers ask before letting a site reach your computer. In Chrome, choose Allow when it
+          asks to connect to devices on your local network, or allow it from the padlock menu in the address bar. In
+          Brave, allow this site under Settings, Privacy and security, Site and Shields settings, Localhost access.
+          Safari does not allow it: use Chrome, or run the app on your own machine.
+        </p>
+      )}
       <form onSubmit={save}>
         <label>
           Where it listens

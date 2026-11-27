@@ -33,7 +33,13 @@ You need one thing on your own machine: a **proof server**. Every Midnight trans
 
 2. Open https://shielded-fanout.fly.dev and follow the six steps on the page.
 
-The page reaches the proof server at `http://127.0.0.1:6300`. Chrome and Firefox allow a site to do that, and may ask for permission to reach your local network. Brave and Safari may block it; if the page keeps saying the proof server is not answering, use Chrome, or [run the app yourself](#run-it-yourself).
+The page reaches the proof server at `http://127.0.0.1:6300`, and browsers ask before letting a site on the internet reach your computer:
+
+- **Chrome:** choose Allow when it asks to connect to devices on your local network, or allow it from the padlock menu in the address bar.
+- **Brave:** allow the site under Settings, Privacy and security, Site and Shields settings, Localhost access.
+- **Safari** does not allow it.
+
+If the page keeps saying the proof server is not answering, that permission is the usual reason. [Running the app yourself](#run-it-yourself) avoids the question, because then the page is on your machine too.
 
 ## Run it yourself
 
@@ -288,6 +294,7 @@ Versions follow the pinned toolchain of the [official Midnight examples](https:/
 
 - **A proof of concept.** The wallet's seed and the token's minting secret are stored unencrypted in the browser. A real custodian keeps them in a vault or an HSM.
 - **Mainnet is offered, not proven.** Deploying, minting and paying out were run on Preprod. On Preview and Mainnet only syncing a new wallet was checked.
+- **The hosted site needs the browser's permission to reach your proof server.** That was not confirmed in Chrome or Brave; running the app locally was.
 - **One sending wallet, one transaction at a time.** Several sending wallets would pay in parallel; that was not tried.
 - **64 recipients per transaction** is the largest size tried. By size about 190 would fit in a block.
 - **Keep the tab open and in front during a payout.** Browsers slow background tabs down.
